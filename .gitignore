@@ -1,0 +1,38 @@
+# Binaries and build output
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+
+# Test, benchmark and coverage output
+*.test
+*.out
+*.prof
+coverage.txt
+coverage.html
+
+# Go workspace and vendoring
+/vendor/
+go.work
+go.work.sum
+
+# Secrets and generated keys (never commit private keys)
+*.pem
+*.key
+.env
+.env.local
+.env.*.local
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
