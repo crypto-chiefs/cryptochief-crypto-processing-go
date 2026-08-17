@@ -45,6 +45,7 @@
 //   - c.StaticDeposits — history / info for static-address deposits
 //   - c.Blockchain     — enabled assets, on-chain balance, tx status
 //   - c.Currencies     — fiat ↔ crypto rate calculator
+//   - c.Credits        — billing credits balance + gas-ops gate (free endpoint)
 //
 // # Contract calls without hand-encoded calldata
 //
@@ -123,4 +124,4 @@
 package cryptochief
 
 // Version is the library version reported in the User-Agent header.
-const Version = "0.1.0"
+const Version = "0.2.0"

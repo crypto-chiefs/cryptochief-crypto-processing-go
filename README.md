@@ -89,6 +89,7 @@ is the **signing secret** — keep it server-side.
 | Static-deposit history | `c.StaticDeposits` | `Info`, `History` |
 | On-chain queries | `c.Blockchain` | `ContractsAvailable`, `WalletBalance`, `TransactionStatus` |
 | Fiat ↔ crypto rate quote | `c.Currencies` | `FiatToCrypto`, `CryptoToFiat` |
+| Billing credits (free endpoints) | `c.Credits` | `Balance`, `Topup` |
 
 ## End-to-end example: payout with confirmation
 

@@ -180,7 +180,8 @@ func TestNew_ValidatesCredentials(t *testing.T) {
 	}
 	if c.Payouts == nil || c.Transactions == nil || c.PayIns == nil ||
 		c.Wallets == nil || c.Sweeps == nil || c.Withdrawals == nil ||
-		c.StaticDeposits == nil || c.Blockchain == nil || c.Currencies == nil {
+		c.StaticDeposits == nil || c.Blockchain == nil || c.Currencies == nil ||
+		c.Credits == nil {
 		t.Error("not all sub-clients wired")
 	}
 }
