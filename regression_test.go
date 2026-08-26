@@ -106,6 +106,61 @@ func TestPayout_AutoConvertPolicyWireShape(t *testing.T) {
 	}
 }
 
+// TestPayIn_MasterWalletAddressWireShape asserts master_wallet_address rides
+// both the order-create and select-asset bodies, and is absent from the wire
+// when unset — absence, not "", is what preserves the backend's default
+// transit-pooling behavior.
+func TestPayIn_MasterWalletAddressWireShape(t *testing.T) {
+	var path, body string
+	srv := captureServer(t, `{"uuid":"u1","status":"pending"}`, &path, &body)
+
+	c, _ := New("m", "k", WithBaseURL(srv.URL), WithRetries(0))
+	_, err := c.PayIns.Create(context.Background(), &CreatePayInRequest{
+		OrderID:             "o1",
+		UserID:              "u",
+		Mode:                PayInModeCrypto,
+		AmountCrypto:        "50.5",
+		Asset:               &Asset{Coin: "USDT", Network: ChainTronMainnet},
+		MasterWalletAddress: "TMasterAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !strings.Contains(body, `"master_wallet_address":"TMasterAAAAAAAAAAAAAAAAAAAAAAAAAAA"`) {
+		t.Errorf("create body must carry master_wallet_address, body=%s", body)
+	}
+
+	_, err = c.PayIns.SelectAsset(context.Background(), &SelectAssetRequest{
+		UUID:                "u1",
+		Coin:                "USDT",
+		Network:             ChainTronMainnet,
+		MasterWalletAddress: "TMasterBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+	})
+	if err != nil {
+		t.Fatalf("SelectAsset: %v", err)
+	}
+	if path != "/v1/payments/asset/select" {
+		t.Errorf("path: %q", path)
+	}
+	if !strings.Contains(body, `"master_wallet_address":"TMasterBBBBBBBBBBBBBBBBBBBBBBBBBBB"`) {
+		t.Errorf("select-asset body must carry master_wallet_address, body=%s", body)
+	}
+
+	_, err = c.PayIns.Create(context.Background(), &CreatePayInRequest{
+		OrderID:      "o2",
+		UserID:       "u",
+		Mode:         PayInModeCrypto,
+		AmountCrypto: "50.5",
+		Asset:        &Asset{Coin: "USDT", Network: ChainTronMainnet},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if strings.Contains(body, "master_wallet_address") {
+		t.Errorf("unset master_wallet_address must be omitted, body=%s", body)
+	}
+}
+
 // TestPayIn_HistoryPath asserts PayIns.History posts to the gateway's pay-in
 // history route, POST /v1/payments/history.
 func TestPayIn_HistoryPath(t *testing.T) {

@@ -29,16 +29,22 @@ const (
 
 // CreatePayInRequest is the body of POST /v1/payments/order/create.
 type CreatePayInRequest struct {
-	OrderID                string    `json:"order_id"`
-	UserID                 string    `json:"user_id"`
-	Mode                   PayInMode `json:"mode"`
-	ToAddress              string    `json:"to_address,omitempty"`
-	LifetimeSec            int       `json:"lifetime_sec,omitempty"`
-	URLCallback            string    `json:"url_callback,omitempty"`
-	URLSuccess             string    `json:"url_success,omitempty"`
-	URLError               string    `json:"url_error,omitempty"`
-	AdditionalData         string    `json:"additional_data,omitempty"`
-	AccuracyPaymentPercent int       `json:"accuracy_payment_percent,omitempty"`
+	OrderID   string    `json:"order_id"`
+	UserID    string    `json:"user_id"`
+	Mode      PayInMode `json:"mode"`
+	ToAddress string    `json:"to_address,omitempty"`
+	// MasterWalletAddress pins the transit deposit wallet of THIS order to
+	// the given master wallet of the project — the address the funds are
+	// swept to. Requires the order's asset/network chain family to match the
+	// master wallet's; a foreign or mismatched address is rejected with 400.
+	// Omit for the previous project-default behavior.
+	MasterWalletAddress    string `json:"master_wallet_address,omitempty"`
+	LifetimeSec            int    `json:"lifetime_sec,omitempty"`
+	URLCallback            string `json:"url_callback,omitempty"`
+	URLSuccess             string `json:"url_success,omitempty"`
+	URLError               string `json:"url_error,omitempty"`
+	AdditionalData         string `json:"additional_data,omitempty"`
+	AccuracyPaymentPercent int    `json:"accuracy_payment_percent,omitempty"`
 
 	// FIAT-mode fields.
 	AmountFiat   string `json:"amount_fiat,omitempty"`
@@ -112,6 +118,10 @@ type SelectAssetRequest struct {
 	UUID    string `json:"uuid"`
 	Coin    string `json:"coin"`
 	Network Chain  `json:"network"`
+	// MasterWalletAddress pins the order's transit deposit wallet to the
+	// given project master wallet; see CreatePayInRequest. A value here
+	// overrides one supplied at order create.
+	MasterWalletAddress string `json:"master_wallet_address,omitempty"`
 }
 
 // Create opens a new PayIn order. Use Mode=FIAT to let the customer pick the
