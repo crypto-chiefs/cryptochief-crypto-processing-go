@@ -14,7 +14,9 @@
 //
 // Run:
 //
-//	API_KEY=...  ADDR=:8080  go run ./examples/webhook_server
+// Run this from the examples/ directory — it is a separate Go module:
+//
+//	API_KEY=...  ADDR=:8080  go run ./webhook_server
 package main
 
 import (
@@ -54,7 +56,7 @@ func printBanner(addr string) {
 	fmt.Println(" Allow-list at your edge:", cryptochief.WebhookSenderIPs)
 	fmt.Println()
 	fmt.Println(" Routes & lifecycles:")
-	fmt.Println("   /webhook/payout         queue → process → paid | failed | expired | cancel")
+	fmt.Println("   /webhook/payout         (terminal-only)  → paid | system_fail")
 	fmt.Println("   /webhook/payin          waiting_asset_select → pending → processing → paid | cancel | expired")
 	fmt.Println("   /webhook/transaction    (terminal-only)  → confirmed | failed | expired")
 	fmt.Println("   /webhook/static-deposit in_mempool → confirm_check → paid | dropped | reorged")

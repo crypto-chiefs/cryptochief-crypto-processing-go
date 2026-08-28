@@ -5,11 +5,13 @@
 // whether the recipient already holds the Jetton — you only describe
 // the transfer in human terms.
 //
+// Run this from the examples/ directory — it is a separate Go module:
+//
 //	MERCHANT_ID=... API_KEY=... \
 //	FROM_ADDRESS=EQYourWallet... \
 //	JETTON_MASTER=EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs  /* USDT */ \
 //	RECIPIENT=EQRecipient... \
-//	go run ./examples/ton_jetton_transfer
+//	go run ./ton_jetton_transfer
 //
 // Set BROADCAST=1 to actually send (default = sign only, signature
 // expires by TTL).

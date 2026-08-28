@@ -3,7 +3,9 @@
 // is cheap and reversible (signature simply expires); only Execute moves
 // funds on-chain.
 //
-//	MERCHANT_ID=... API_KEY=... FROM_ADDRESS=0x... TO_ADDRESS=0x... go run ./examples/sign_execute
+// Run this from the examples/ directory — it is a separate Go module:
+//
+//	MERCHANT_ID=... API_KEY=... FROM_ADDRESS=0x... TO_ADDRESS=0x... go run ./sign_execute
 package main
 
 import (
@@ -63,7 +65,13 @@ func main() {
 		Timeout:  8 * time.Minute,
 	})
 	if err != nil {
-		log.Fatalf("wait: last status=%s err=%v", final.Status, err)
+		// The helper returns a nil snapshot when no poll ever succeeded, so
+		// there is not always a last status to report.
+		status := "unknown"
+		if final != nil {
+			status = final.Status
+		}
+		log.Fatalf("wait: last status=%s err=%v", status, err)
 	}
 	fmt.Printf("terminal: status=%s fee=%s ($%s)\n",
 		final.Status, final.ActualFee, final.ActualFeeFiat)

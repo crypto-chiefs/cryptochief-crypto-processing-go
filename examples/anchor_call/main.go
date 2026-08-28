@@ -2,11 +2,13 @@
 // and Borsh-encoded arguments are produced automatically — you only describe
 // the args by Borsh type.
 //
+// Run this from the examples/ directory — it is a separate Go module:
+//
 //	MERCHANT_ID=... API_KEY=... \
 //	FROM_ADDRESS=YourWallet... \
 //	PROGRAM=YourProgramId... \
 //	METHOD=initialize \
-//	go run ./examples/anchor_call
+//	go run ./anchor_call
 package main
 
 import (

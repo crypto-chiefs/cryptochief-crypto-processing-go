@@ -9,8 +9,10 @@
 //	openssl genrsa -out rsa_private.pem 2048
 //	openssl rsa -in rsa_private.pem -pubout -out rsa_public.pem
 //
+// Run this from the examples/ directory — it is a separate Go module:
+//
 //	MERCHANT_ID=... API_KEY=... RSA_KEY=./rsa_private.pem \
-//	go run ./examples/wallet_generate
+//	go run ./wallet_generate
 package main
 
 import (

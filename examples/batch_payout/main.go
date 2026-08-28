@@ -1,7 +1,9 @@
 // batch_payout shows the mass-payout flow: up to 50 items in one call,
 // per-item statuses, and polling each accepted item to terminal.
 //
-//	MERCHANT_ID=... API_KEY=... TO_ADDRESS=0x... go run ./examples/batch_payout
+// Run this from the examples/ directory — it is a separate Go module:
+//
+//	MERCHANT_ID=... API_KEY=... TO_ADDRESS=0x... go run ./batch_payout
 package main
 
 import (

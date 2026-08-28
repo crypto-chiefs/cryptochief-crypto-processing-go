@@ -2,11 +2,13 @@
 // SignEVMCall flow as EVM — TRON shares the ABI encoding, so the SDK accepts
 // TRON base58 addresses transparently.
 //
+// Run this from the examples/ directory — it is a separate Go module:
+//
 //	MERCHANT_ID=... API_KEY=... \
 //	FROM_ADDRESS=TYourWallet... \
 //	TOKEN=TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t  /* USDT TRC-20 */ \
 //	RECIPIENT=TRecipient... \
-//	go run ./examples/trc20_transfer
+//	go run ./trc20_transfer
 package main
 
 import (

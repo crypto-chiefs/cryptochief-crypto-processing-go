@@ -4,7 +4,9 @@
 // Set DRY_RUN=1 to stop after Estimate without actually moving funds — the
 // default is to broadcast.
 //
-//	MERCHANT_ID=... API_KEY=... TO_ADDRESS=0x... go run ./examples/payout
+// Run this from the examples/ directory — it is a separate Go module:
+//
+//	MERCHANT_ID=... API_KEY=... TO_ADDRESS=0x... go run ./payout
 package main
 
 import (
@@ -66,7 +68,13 @@ func main() {
 		Timeout:  4 * time.Minute,
 	})
 	if err != nil {
-		log.Fatalf("wait: last status=%s err=%v", final.Status, err)
+		// The helper returns a nil snapshot when no poll ever succeeded, so
+		// there is not always a last status to report.
+		status := "unknown"
+		if final != nil {
+			status = final.Status
+		}
+		log.Fatalf("wait: last status=%s err=%v", status, err)
 	}
 	fmt.Printf("terminal: status=%s txid=%s\n", final.Status, final.TxID)
 }

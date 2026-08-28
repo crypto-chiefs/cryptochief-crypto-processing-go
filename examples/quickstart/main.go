@@ -1,7 +1,9 @@
 // quickstart shows the smallest useful program: list a project's enabled
 // assets and print one wallet's balance.
 //
-//	go run ./examples/quickstart
+// Run this from the examples/ directory — it is a separate Go module:
+//
+//	go run ./quickstart
 package main
 
 import (
