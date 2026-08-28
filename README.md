@@ -84,7 +84,7 @@ is the **signing secret** — keep it server-side.
 | TON contract calls (Jetton / NFT / text) | `c.Transactions` | `JettonTransfer`, `NFTTransfer`, `SendTONComment`, `SignTONCall` |
 | Accept incoming payments | `c.PayIns` | `Create`, `SelectAsset`, `ResetAsset`, `Cancel`, `Info`, `History` |
 | Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `DecryptPrivateKey` |
-| Treasury sweeps | `c.Sweeps` | `Force`, `History`, `WalletHistory` |
+| Treasury sweeps | `c.Sweeps` | `Force`, `History`, `WalletHistory`, `Settings`, `UpdateSettings` |
 | Withdrawals (read-only) | `c.Withdrawals` | `Info`, `History` |
 | Static-deposit history | `c.StaticDeposits` | `Info`, `History` |
 | On-chain queries | `c.Blockchain` | `ContractsAvailable`, `WalletBalance`, `TransactionStatus` |
@@ -495,6 +495,41 @@ with `cryptochief.WebhookHandler[...]`.
 **Which blockchains does the crypto processing API support?**
 Ethereum, BNB Smart Chain, Polygon, Tron, TON, Solana, Bitcoin, Litecoin,
 Dogecoin, XRP and more — 25 chains in total. The constants live in `chains.go`.
+
+**How do I control when a deposit wallet is swept?**
+`c.Sweeps.Settings(...)` reads the policy in force for one wallet and
+`c.Sweeps.UpdateSettings(...)` changes it — sweep on arrival (`SweepModeMomentum`),
+sweep once the balance reaches an amount (`SweepModeThreshold` plus
+`ThresholdUSD`), or never on its own (`SweepModeOff`, force still works). The
+read comes back in three layers — what will happen, what this wallet overrides,
+and what it inherits from the project — so you can tell a value of your own from
+an inherited one:
+
+```go
+mode, threshold := cryptochief.SweepModeThreshold, "250"
+s, err := c.Sweeps.UpdateSettings(ctx, cryptochief.SweepSettingsUpdate{
+    Address:      depositAddress,
+    TypeWork:     &mode,
+    ThresholdUSD: &threshold,
+})
+// s.Effective is the resolved policy; s.Effective.Source says which layer it came from.
+```
+
+Inheritance is per field: overriding the mode leaves the fee mode inherited. To
+stop overriding a field, name it in `Fields` and leave its value nil.
+
+**How do I know a sweep actually settled?**
+Check `Status`. `SweepStatusBroadcasted` means the transaction is out and not yet
+confirmed; `SweepStatusCompleted` means confirmed, with `SweepConfirmations` and
+`CompletedAt` filled in. Earlier platform versions reported `completed` at
+broadcast, so a sweep could read completed while its transaction was still
+unconfirmed.
+
+**How do I keep test payments off real chains?**
+Set `Environment` on `PayIns.Create` to `cryptochief.EnvironmentTestnet` or
+`EnvironmentMainnet`. It constrains the asset the platform picks when you have
+not named a concrete network — fiat mode and `ANY` — so an unconstrained pick
+cannot put a real payment on a test chain. Omit it to use the project's default.
 
 **How do I avoid floating-point rounding bugs with crypto amounts?**
 Never use `float64`. Convert with `cryptochief.HumanToBase` / `BaseToHuman`,

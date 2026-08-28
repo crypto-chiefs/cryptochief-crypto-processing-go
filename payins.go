@@ -28,6 +28,15 @@ const (
 )
 
 // CreatePayInRequest is the body of POST /v1/payments/order/create.
+// The two environments an order can belong to. A project may be allowed one or
+// both; asking for testnet on a project that does not permit it is refused with
+// TESTNET_NOT_ALLOWED rather than quietly served on mainnet, and a value that is
+// neither is ENVIRONMENT_INVALID rather than a silent fallback.
+const (
+	EnvironmentMainnet = "mainnet"
+	EnvironmentTestnet = "testnet"
+)
+
 type CreatePayInRequest struct {
 	OrderID   string    `json:"order_id"`
 	UserID    string    `json:"user_id"`
@@ -38,7 +47,17 @@ type CreatePayInRequest struct {
 	// swept to. Requires the order's asset/network chain family to match the
 	// master wallet's; a foreign or mismatched address is rejected with 400.
 	// Omit for the previous project-default behavior.
-	MasterWalletAddress    string `json:"master_wallet_address,omitempty"`
+	MasterWalletAddress string `json:"master_wallet_address,omitempty"`
+	// Environment constrains the asset the platform PICKS for this order to
+	// the real chains or the test ones: EnvironmentMainnet or
+	// EnvironmentTestnet. Omit to use the project's own default.
+	//
+	// It changes nothing when Asset names a concrete network - that is the
+	// caller's choice. It matters in fiat mode and when the network is ANY,
+	// where the platform selects the asset and an unconstrained pick could put
+	// a real payment on a test network.
+	Environment string `json:"environment,omitempty"`
+
 	LifetimeSec            int    `json:"lifetime_sec,omitempty"`
 	URLCallback            string `json:"url_callback,omitempty"`
 	URLSuccess             string `json:"url_success,omitempty"`
