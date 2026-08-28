@@ -156,6 +156,14 @@ description, get back a signed reservation.
 
 ### EVM — Uniswap V2 swap
 
+> **This snippet shows the encoder, not a complete swap.** Uniswap's router
+> moves your input token with `transferFrom`, so it needs an ERC-20
+> `approve(address,uint256)` on that token first, confirmed before the swap is
+> signed — without it the swap reverts and burns the gas. And an `amountOutMin`
+> of `0` accepts whatever the pool returns, which on a public mempool hands the
+> trade to the first sandwich bot that sees it. The runnable version, with both,
+> is in `examples/`.
+
 ```go
 amountIn,   _ := cryptochief.HumanToBase("0.01", 18)
 amountOutMin := big.NewInt(0)
