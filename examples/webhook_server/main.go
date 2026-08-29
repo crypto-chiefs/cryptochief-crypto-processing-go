@@ -11,6 +11,7 @@
 //	POST /webhook/payin           — PayIn lifecycle
 //	POST /webhook/transaction     — two-phase sign/execute results
 //	POST /webhook/static-deposit  — incoming deposits on static wallets
+//	POST /webhook/sweep           — swept funds confirmed on your master wallet
 //
 // Run:
 //
@@ -43,6 +44,7 @@ func main() {
 	mux.Handle("/webhook/payin", cryptochief.WebhookHandler[cryptochief.PayInWebhookEvent](apiKey, handlePayIn))
 	mux.Handle("/webhook/transaction", cryptochief.WebhookHandler[cryptochief.TransactionWebhookEvent](apiKey, handleTransaction))
 	mux.Handle("/webhook/static-deposit", cryptochief.WebhookHandler[cryptochief.StaticDepositWebhookEvent](apiKey, handleStaticDeposit))
+	mux.Handle("/webhook/sweep", cryptochief.WebhookHandler[cryptochief.SweepWebhookEvent](apiKey, handleSweep))
 
 	printBanner(addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
@@ -60,6 +62,7 @@ func printBanner(addr string) {
 	fmt.Println("   /webhook/payin          waiting_asset_select → pending → processing → paid | cancel | expired")
 	fmt.Println("   /webhook/transaction    (terminal-only)  → confirmed | failed | expired")
 	fmt.Println("   /webhook/static-deposit in_mempool → confirm_check → paid | dropped | reorged")
+	fmt.Println("   /webhook/sweep          (confirmed-only) → funds settled on your master wallet")
 	fmt.Println("──────────────────────────────────────────────────────────────")
 }
 
@@ -186,6 +189,45 @@ func handleStaticDeposit(w http.ResponseWriter, r *http.Request, evt cryptochief
 		// TODO: balances.Reverse(ctx, evt.UUID)
 		// TODO: ops.Alert("deposit reverted", evt)
 	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sweep — your money finishing its move into your own custody
+//
+// A static_deposit.paid told you a customer paid. THIS tells you the funds have
+// actually been swept off the deposit address and the sweep is confirmed on
+// chain. Until it fires the balance still sits on the deposit wallet, so this -
+// not the deposit - is what treasury reporting and "available to pay out"
+// should key off.
+//
+// Fires once per sweep, on confirmation only. There is no sweep.broadcasted:
+// "we sent it" is not actionable, and an event meaning "maybe" is one more
+// thing to reconcile.
+//
+// Sweeps run on static deposit wallets and on per-order transit wallets alike;
+// both arrive here, at the callback URL configured for the wallet the funds
+// left.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func handleSweep(w http.ResponseWriter, r *http.Request, evt cryptochief.SweepWebhookEvent) {
+	log.Printf("[sweep] task=%s %s %s from=%s → master=%s tx=%s confirmations=%d trigger=%s fee_usd=%s",
+		evt.TaskID, evt.Amount, evt.AssetSymbol, evt.WalletAddress, evt.ToAddress,
+		evt.SweepTxHash, evt.Confirmations, evt.TypeWork, evt.TotalFeeUSD)
+
+	// The event only ever arrives confirmed, but if you run your own finality
+	// policy, apply it here - "confirmed" is not the same number on every chain.
+	log.Printf("  → ACTION: move %s %s from 'on deposit wallet' to 'in treasury' for the wallet %s",
+		evt.Amount, evt.AssetSymbol, evt.WalletAddress)
+	// customerID := lookupCustomerByDepositAddress(evt.WalletAddress)
+	// TODO: treasury.RecordSettled(ctx, evt.TaskID, evt.AssetSymbol, evt.Amount, evt.SweepTxHash)
+	// TODO: ledger.MoveToAvailable(ctx, customerID, evt.AssetSymbol, evt.Amount)
+	// TODO: costs.Record(ctx, evt.TaskID, evt.TotalFeeUSD)  // sweeps are not free
+
+	// TaskID is the idempotency key: one sweep settles once. If you have already
+	// recorded this task, you are seeing a redelivery - acknowledge and stop.
+	// TODO: if treasury.AlreadyRecorded(ctx, evt.TaskID) { w.WriteHeader(200); return }
 
 	w.WriteHeader(http.StatusOK)
 }

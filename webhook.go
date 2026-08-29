@@ -215,3 +215,64 @@ type StaticDepositWebhookEvent struct {
 	ConfirmedAt           string `json:"confirmed_at,omitempty"`
 	PaidAt                string `json:"paid_at,omitempty"`
 }
+
+// SweepEventConfirmed is the only sweep event the platform emits.
+//
+// There is deliberately no sweep.broadcasted. "We sent it" is not something you
+// can act on, and an event that means "maybe" is one more thing to reconcile.
+const SweepEventConfirmed = "sweep.confirmed"
+
+// SweepWebhookEvent is the payload on "sweep.confirmed": funds that arrived on
+// one of your deposit wallets have been swept to your master wallet AND the
+// sweep transaction is confirmed on chain.
+//
+// WHAT THIS IS FOR. A "static_deposit.paid" event tells you a customer paid
+// you. This tells you the money has finished moving into your own custody.
+// Until it fires, the balance still sits on the deposit address. Reconciliation,
+// treasury reporting and "funds available to pay out" all key off this event,
+// not off the deposit.
+//
+// Sweeps run on static deposit wallets AND on the transit wallets issued per
+// pay-in order, and both deliver here, to the callback URL configured for the
+// wallet the funds left.
+//
+// WalletAddress is that wallet - the one your customer paid into. ToAddress is
+// the master it landed on.
+type SweepWebhookEvent struct {
+	Event  string `json:"event"`
+	TaskID string `json:"task_id"`
+	// Status is "completed". A sweep reaches you in no other state.
+	Status string `json:"status"`
+
+	WalletAddress string `json:"wallet_address"`
+	ToAddress     string `json:"to_address,omitempty"`
+
+	Network       Chain  `json:"network"`
+	ChainFamily   string `json:"chain_family,omitempty"`
+	AssetSymbol   string `json:"asset_symbol"`
+	Contract      string `json:"asset_contract,omitempty"`
+	AssetType     string `json:"asset_type,omitempty"` // "native" | "token"
+	AmountRaw     string `json:"amount_raw,omitempty"`
+	Amount        string `json:"amount_human,omitempty"`
+	SweepTxHash   string `json:"sweep_tx_hash"`
+	GasPumpTxHash string `json:"gas_pump_tx_hash,omitempty"`
+
+	// Confirmations is what makes this event true rather than hopeful, and it
+	// travels with the event rather than being implied by it: "confirmed" is not
+	// the same number on every chain, so if you run your own finality policy you
+	// need the count to apply it. It is never zero.
+	Confirmations int `json:"sweep_confirmations"`
+
+	// ConfirmedAt is when the chain was observed to hold the sweep. It is NOT
+	// the task's completion timestamp, which is stamped on every terminal
+	// outcome including failures and so says nothing about settlement.
+	ConfirmedAt string `json:"confirmed_at,omitempty"`
+
+	// TypeWork is what triggered the sweep: "momentum" (as soon as funds
+	// arrived), "threshold" (a balance limit was reached) or "force" (you asked
+	// for it).
+	TypeWork string `json:"type_work,omitempty"`
+	// TotalFeeUSD is what the sweep cost, network fee plus any gas or energy
+	// the platform fronted to make it possible.
+	TotalFeeUSD string `json:"total_fee_usd,omitempty"`
+}
