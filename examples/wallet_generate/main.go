@@ -37,9 +37,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Label is optional and works on every wallet type — it is your own
+	// bookkeeping name for the wallet, not something the platform routes on.
 	w, err := c.Wallets.Generate(ctx, &cryptochief.GenerateWalletRequest{
 		WalletType:  cryptochief.WalletTypeMaster,
 		ChainFamily: cryptochief.FamilyEVM,
+		Label:       "treasury EVM",
 	})
 	if err != nil {
 		log.Fatalf("generate: %v", err)

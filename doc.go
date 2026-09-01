@@ -39,7 +39,9 @@
 //     plus one-call helpers for EVM/TRON contract calls, Solana Anchor
 //     programs, and TON Jetton / NFT / comment transfers
 //   - c.PayIns         — accept incoming payments
-//   - c.Wallets        — generate, list, info, freeze; decrypt RSA-encrypted private keys
+//   - c.Wallets        — generate (optionally labelled), list, info, freeze,
+//     re-bind to another master, set/clear a static wallet's deposit
+//     webhook; decrypt RSA-encrypted private keys
 //   - c.Sweeps         — force transit→master sweep + history
 //   - c.Withdrawals    — read-only history / info for treasury withdrawals
 //   - c.StaticDeposits — history / info for static-address deposits

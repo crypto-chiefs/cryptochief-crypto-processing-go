@@ -21,19 +21,32 @@ type GenerateWalletRequest struct {
 	ChainFamily         ChainFamily `json:"chain_family"`
 	MasterWalletAddress string      `json:"master_wallet_address,omitempty"` // transit/static only
 	CallbackURL         string      `json:"callback_url,omitempty"`          // static only
+
+	// Label is a human-readable name for the wallet — "hot wallet EU",
+	// "customer 4242". It applies to every wallet type, not only static ones,
+	// and is for your own bookkeeping: it carries no routing meaning. Max 255
+	// characters; left off the wire when empty.
+	Label string `json:"label,omitempty"`
 }
 
 // Wallet is the merchant-side view of one wallet.
 type Wallet struct {
-	Address             string      `json:"address"`
-	ChainFamily         ChainFamily `json:"chain_family"`
-	Type                WalletType  `json:"type,omitempty"`
-	WalletType          WalletType  `json:"wallet_type,omitempty"`
-	Frozen              bool        `json:"frozen,omitempty"`
-	MasterWalletAddress string      `json:"master_wallet_address,omitempty"`
-	CallbackURL         string      `json:"callback_url,omitempty"`
-	PrivateKeyEncrypted string      `json:"private_key_encrypted,omitempty"`
-	CreatedAt           string      `json:"created_at,omitempty"`
+	Address     string      `json:"address"`
+	ChainFamily ChainFamily `json:"chain_family"`
+	Type        WalletType  `json:"type,omitempty"`
+	WalletType  WalletType  `json:"wallet_type,omitempty"`
+	Frozen      bool        `json:"frozen,omitempty"`
+
+	// MasterWalletAddress and CallbackURL are always present in the wallet-info
+	// shape and are JSON null when the wallet has no such value — a master has
+	// no master of its own, a transit wallet never has a callback. Both decode
+	// to the empty string, so an empty value means "not set" rather than "the
+	// platform omitted it".
+	MasterWalletAddress string `json:"master_wallet_address,omitempty"`
+	CallbackURL         string `json:"callback_url,omitempty"`
+
+	PrivateKeyEncrypted string `json:"private_key_encrypted,omitempty"`
+	CreatedAt           string `json:"created_at,omitempty"`
 
 	// Populated by /v1/wallets/info.
 	Coins           []WalletCoinBalance `json:"coins,omitempty"`
@@ -62,6 +75,11 @@ type ListWalletsResponse struct {
 // wallets are root-of-trust; transit and static wallets attach to a master.
 // Static wallets get a fixed deposit address per-customer (with optional
 // callback_url for per-deposit webhooks).
+//
+// Label names the wallet for your own bookkeeping and works for every wallet
+// type. Neither it nor the callback URL is frozen at creation: see
+// [WalletsService.SetCallbackURL] and, for the master a wallet settles to,
+// [WalletsService.RebindMaster].
 func (s *WalletsService) Generate(ctx context.Context, in *GenerateWalletRequest) (*Wallet, error) {
 	var out Wallet
 	if err := s.c.do(ctx, "/v1/wallets/generate", in, &out); err != nil {
@@ -97,6 +115,65 @@ func (s *WalletsService) Freeze(ctx context.Context, address string) (*Wallet, e
 		return nil, err
 	}
 	return &out, nil
+}
+
+// RebindMaster re-points a transit or static wallet at another master wallet of
+// the same project and returns the wallet as it stands afterwards.
+//
+// It moves no money. What changes is where the NEXT sweep settles — including
+// sweeps already queued but not yet sent, which will land on the new master.
+// Anything already swept stays on the previous master; move it with a payout if
+// you need it elsewhere.
+//
+// The call is idempotent: re-binding a wallet to the master it is already bound
+// to succeeds and changes nothing. Master wallets cannot be re-pointed, and the
+// new master must belong to the same project and chain family and must not be
+// frozen.
+//
+//	w, err := c.Wallets.RebindMaster(ctx, depositAddress, newMasterAddress)
+//	// w.MasterWalletAddress is the master the next sweep will settle to.
+func (s *WalletsService) RebindMaster(ctx context.Context, address, masterWalletAddress string) (*Wallet, error) {
+	body := map[string]string{
+		"address":               address,
+		"master_wallet_address": masterWalletAddress,
+	}
+	var out Wallet
+	if err := s.c.do(ctx, "/v1/wallets/rebind-master", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetCallbackURL sets or clears the deposit webhook of a static wallet after it
+// has been created, and returns the wallet as it stands afterwards.
+//
+// Static wallets only — master and transit wallets have no deposit webhook and
+// the endpoint refuses them with a 400.
+//
+// An empty callbackURL is a value, not an omission: it clears the webhook, and
+// the SDK sends it on the wire as "" rather than leaving the field out. Use
+// [WalletsService.ClearCallbackURL] to say so plainly.
+//
+// The new URL applies to deposits announced from here on. A deposit already
+// announced is not re-announced to it.
+func (s *WalletsService) SetCallbackURL(ctx context.Context, address, callbackURL string) (*Wallet, error) {
+	// A map, not a struct with omitempty: "" must reach the platform as an
+	// empty string — that is how a webhook is cleared.
+	body := map[string]string{
+		"address":      address,
+		"callback_url": callbackURL,
+	}
+	var out Wallet
+	if err := s.c.do(ctx, "/v1/wallets/callback-url", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearCallbackURL removes the deposit webhook from a static wallet. It is
+// [WalletsService.SetCallbackURL] with an empty URL, spelled out.
+func (s *WalletsService) ClearCallbackURL(ctx context.Context, address string) (*Wallet, error) {
+	return s.SetCallbackURL(ctx, address, "")
 }
 
 // DecryptPrivateKey decrypts the `private_key_encrypted` field of a

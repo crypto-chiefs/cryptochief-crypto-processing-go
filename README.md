@@ -83,7 +83,7 @@ is the **signing secret** — keep it server-side.
 | Solana programs | `c.Transactions` | `SignAnchorCall`, `SignSolanaCall` |
 | TON contract calls (Jetton / NFT / text) | `c.Transactions` | `JettonTransfer`, `NFTTransfer`, `SendTONComment`, `SignTONCall` |
 | Accept incoming payments | `c.PayIns` | `Create`, `SelectAsset`, `ResetAsset`, `Cancel`, `Info`, `History` |
-| Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `DecryptPrivateKey` |
+| Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `RebindMaster`, `SetCallbackURL`, `DecryptPrivateKey` |
 | Treasury sweeps | `c.Sweeps` | `Force`, `History`, `WalletHistory`, `Settings`, `UpdateSettings` |
 | Withdrawals (read-only) | `c.Withdrawals` | `Info`, `History` |
 | Static-deposit history | `c.StaticDeposits` | `Info`, `History` |
@@ -503,6 +503,50 @@ with `cryptochief.WebhookHandler[...]`.
 **Which blockchains does the crypto processing API support?**
 Ethereum, BNB Smart Chain, Polygon, Tron, TON, Solana, Bitcoin, Litecoin,
 Dogecoin, XRP and more — 25 chains in total. The constants live in `chains.go`.
+
+**How do I name a wallet so I can tell them apart?**
+Pass `Label` to `Wallets.Generate` — a human-readable name of up to 255
+characters, on any wallet type, not just static ones. Leave it empty and it
+stays off the wire.
+
+```go
+w, _ := c.Wallets.Generate(ctx, &cryptochief.GenerateWalletRequest{
+    WalletType:          cryptochief.WalletTypeStatic,
+    ChainFamily:         cryptochief.FamilyEVM,
+    MasterWalletAddress: masterAddress,
+    Label:               "customer 4242",
+})
+```
+
+**How do I move a deposit wallet to a different master wallet?**
+`c.Wallets.RebindMaster(ctx, address, newMaster)` re-points a transit or static
+wallet at another master of the same project and chain family:
+
+```go
+w, err := c.Wallets.RebindMaster(ctx, depositAddress, newMasterAddress)
+// w.MasterWalletAddress is the master the next sweep will settle to.
+```
+
+It moves no money. It changes where the **next** sweep settles — including
+sweeps already queued — while anything already swept stays on the previous
+master. Re-binding to the master a wallet is already on is a no-op that returns
+200, so the call is safe to repeat. Master wallets cannot be re-pointed, and a
+frozen master is refused.
+
+**How do I change a static wallet's deposit webhook after creating it?**
+`c.Wallets.SetCallbackURL(ctx, address, url)`, and
+`c.Wallets.ClearCallbackURL(ctx, address)` to remove it — clearing sends
+`callback_url` as an empty string rather than omitting the field, which is what
+the platform reads as "no webhook".
+
+```go
+c.Wallets.SetCallbackURL(ctx, depositAddress, "https://api.example.com/hooks/deposit")
+c.Wallets.ClearCallbackURL(ctx, depositAddress)
+```
+
+Static wallets only — master and transit wallets have no deposit webhook and the
+endpoint refuses them. A deposit that was already announced is not re-announced
+to the new URL.
 
 **How do I control when a deposit wallet is swept?**
 `c.Sweeps.Settings(...)` reads the policy in force for one wallet and
