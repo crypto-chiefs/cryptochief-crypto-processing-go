@@ -66,15 +66,19 @@ func (e *APIError) Is(target error) bool {
 // the server is free to add new ones. Treat the Code field as opaque if you
 // don't recognise it.
 const (
-	CodeInsufficientFunds     = "INSUFFICIENT_FUNDS"
-	CodeInsufficientCredits   = "INSUFFICIENT_CREDITS"
-	CodeDebtLimitExceeded     = "DEBT_LIMIT_EXCEEDED"
-	CodeAssetNotEnabled       = "ASSET_NOT_ENABLED"
-	CodeOrderAlreadyExists    = "ORDER_ALREADY_EXIST"
-	CodeOrderCannotCancel     = "ORDER_CANNOT_CANCEL"
-	CodeOrderNotLive          = "ORDER_NOT_LIVE"
-	CodeAssetAlreadySelected  = "ASSET_ALREADY_SELECTED"
-	CodeInvalidParams         = "INVALID_PARAMS"
+	CodeInsufficientFunds    = "INSUFFICIENT_FUNDS"
+	CodeInsufficientCredits  = "INSUFFICIENT_CREDITS"
+	CodeDebtLimitExceeded    = "DEBT_LIMIT_EXCEEDED"
+	CodeAssetNotEnabled      = "ASSET_NOT_ENABLED"
+	CodeOrderAlreadyExists   = "ORDER_ALREADY_EXIST"
+	CodeOrderCannotCancel    = "ORDER_CANNOT_CANCEL"
+	CodeOrderNotLive         = "ORDER_NOT_LIVE"
+	CodeAssetAlreadySelected = "ASSET_ALREADY_SELECTED"
+	CodeInvalidParams        = "INVALID_PARAMS"
+	// CodeLabelTooLong — a wallet label over 255 characters. A real machine code
+	// from the gateway, unlike the upstream refusals that arrive as SERVICE_ERROR
+	// with the detail in the message.
+	CodeLabelTooLong          = "LABEL_TOO_LONG"
 	CodeServiceError          = "SERVICE_ERROR"
 	CodeUnauthorized          = "UNAUTHORIZED"
 	CodeURLCallbackRequired   = "URL_CALLBACK_REQUIRED"

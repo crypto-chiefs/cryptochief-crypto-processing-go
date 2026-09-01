@@ -37,13 +37,15 @@ type Wallet struct {
 	WalletType  WalletType  `json:"wallet_type,omitempty"`
 	Frozen      bool        `json:"frozen,omitempty"`
 
-	// MasterWalletAddress and CallbackURL are always present in the wallet-info
-	// shape and are JSON null when the wallet has no such value — a master has
-	// no master of its own, a transit wallet never has a callback. Both decode
-	// to the empty string, so an empty value means "not set" rather than "the
-	// platform omitted it".
+	// MasterWalletAddress, CallbackURL and Label are always present in the
+	// wallet-info shape and are JSON null when the wallet has no such value — a
+	// master has no master of its own, a transit wallet never has a callback,
+	// an unnamed wallet has no label. All three decode to the empty string, so
+	// an empty value means "not set" rather than "the platform omitted it";
+	// the platform never sends "" for a name it has.
 	MasterWalletAddress string `json:"master_wallet_address,omitempty"`
 	CallbackURL         string `json:"callback_url,omitempty"`
+	Label               string `json:"label,omitempty"`
 
 	PrivateKeyEncrypted string `json:"private_key_encrypted,omitempty"`
 	CreatedAt           string `json:"created_at,omitempty"`
@@ -77,8 +79,9 @@ type ListWalletsResponse struct {
 // callback_url for per-deposit webhooks).
 //
 // Label names the wallet for your own bookkeeping and works for every wallet
-// type. Neither it nor the callback URL is frozen at creation: see
-// [WalletsService.SetCallbackURL] and, for the master a wallet settles to,
+// type. Nothing set here is frozen at creation: rename the wallet later with
+// [WalletsService.SetLabel], change its deposit webhook with
+// [WalletsService.SetCallbackURL], and change the master it settles to with
 // [WalletsService.RebindMaster].
 func (s *WalletsService) Generate(ctx context.Context, in *GenerateWalletRequest) (*Wallet, error) {
 	var out Wallet
@@ -174,6 +177,40 @@ func (s *WalletsService) SetCallbackURL(ctx context.Context, address, callbackUR
 // [WalletsService.SetCallbackURL] with an empty URL, spelled out.
 func (s *WalletsService) ClearCallbackURL(ctx context.Context, address string) (*Wallet, error) {
 	return s.SetCallbackURL(ctx, address, "")
+}
+
+// SetLabel renames a wallet — or takes its name away — after it has been
+// created, and returns the wallet as it stands afterwards.
+//
+// Every wallet type can be named: master, transit and static alike, unlike the
+// deposit webhook, which is static-only. The label is your own bookkeeping name
+// and carries no routing meaning. It is capped at 255 characters; a longer one
+// is refused with LABEL_TOO_LONG.
+//
+// An empty label is a value, not an omission: it removes the name, and the SDK
+// sends it on the wire as "" rather than leaving the field out. Use
+// [WalletsService.ClearLabel] to say so plainly.
+//
+//	w, err := c.Wallets.SetLabel(ctx, depositAddress, "customer 4242")
+//	// w.Label is the name the wallet now carries, empty if it has none.
+func (s *WalletsService) SetLabel(ctx context.Context, address, label string) (*Wallet, error) {
+	// A map, not a struct with omitempty: "" must reach the platform as an
+	// empty string — that is how a name is removed.
+	body := map[string]string{
+		"address": address,
+		"label":   label,
+	}
+	var out Wallet
+	if err := s.c.do(ctx, "/v1/wallets/label", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearLabel removes the name from a wallet. It is [WalletsService.SetLabel]
+// with an empty label, spelled out.
+func (s *WalletsService) ClearLabel(ctx context.Context, address string) (*Wallet, error) {
+	return s.SetLabel(ctx, address, "")
 }
 
 // DecryptPrivateKey decrypts the `private_key_encrypted` field of a

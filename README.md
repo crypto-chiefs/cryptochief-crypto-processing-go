@@ -83,7 +83,7 @@ is the **signing secret** — keep it server-side.
 | Solana programs | `c.Transactions` | `SignAnchorCall`, `SignSolanaCall` |
 | TON contract calls (Jetton / NFT / text) | `c.Transactions` | `JettonTransfer`, `NFTTransfer`, `SendTONComment`, `SignTONCall` |
 | Accept incoming payments | `c.PayIns` | `Create`, `SelectAsset`, `ResetAsset`, `Cancel`, `Info`, `History` |
-| Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `RebindMaster`, `SetCallbackURL`, `DecryptPrivateKey` |
+| Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `RebindMaster`, `SetCallbackURL`, `SetLabel`, `DecryptPrivateKey` |
 | Treasury sweeps | `c.Sweeps` | `Force`, `History`, `WalletHistory`, `Settings`, `UpdateSettings` |
 | Withdrawals (read-only) | `c.Withdrawals` | `Info`, `History` |
 | Static-deposit history | `c.StaticDeposits` | `Info`, `History` |
@@ -517,6 +517,21 @@ w, _ := c.Wallets.Generate(ctx, &cryptochief.GenerateWalletRequest{
     Label:               "customer 4242",
 })
 ```
+
+Rename it afterwards with `c.Wallets.SetLabel(ctx, address, name)`, or
+`c.Wallets.ClearLabel(ctx, address)` to take the name away — clearing sends
+`label` as an empty string rather than omitting the field, which is what the
+platform reads as "no name".
+
+```go
+c.Wallets.SetLabel(ctx, depositAddress, "customer 4242")
+c.Wallets.ClearLabel(ctx, depositAddress)
+```
+
+Every wallet type can be renamed, master wallets included; a name over 255
+characters comes back as `LABEL_TOO_LONG`. The name is on every response that
+describes a wallet — generation, info, the list, and the updates themselves — as
+`w.Label`, empty when the wallet has none.
 
 **How do I move a deposit wallet to a different master wallet?**
 `c.Wallets.RebindMaster(ctx, address, newMaster)` re-points a transit or static

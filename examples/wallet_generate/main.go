@@ -49,6 +49,10 @@ func main() {
 	}
 	fmt.Printf("address:        %s\n", w.Address)
 	fmt.Printf("chain_family:   %s\n", w.ChainFamily)
+	// Every response describing a wallet carries the label back; it is empty
+	// when the wallet has no name. Rename it later with Wallets.SetLabel, or
+	// drop the name with Wallets.ClearLabel.
+	fmt.Printf("label:          %s\n", w.Label)
 
 	// The API returns the private key encrypted with your RSA public key.
 	// DecryptPrivateKey uses the configured private key to recover the
