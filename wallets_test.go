@@ -195,6 +195,81 @@ func TestWalletLabel_EmptyIsSentNotOmitted(t *testing.T) {
 	}
 }
 
+// The pay-ins of one deposit address are ordinary orders in the ordinary paged
+// envelope: the address must reach the platform, the optional filters must stay
+// off the wire when unset, and the rows must decode as PayIn records rather than
+// into a second, parallel order type.
+func TestWalletPayInHistory_WireShapeAndDecode(t *testing.T) {
+	var path, body string
+	srv := captureServer(t, `{"items":[
+		{"uuid":"0a1b2c3d-4e5f-6789-abcd-ef0123456789","order_id":"invoice-1002","status":"paid","amount_crypto":"10.5","payment_coin":"USDT","payment_network":"TRON_MAINNET","to_address":"TQrY8bYc2yQ8sM8nJ1sZ9c2Zx7L2wq7pQb"}
+	],"meta":{"page":1,"page_size":20,"total":1}}`, &path, &body)
+
+	c, _ := New("m", "k", WithBaseURL(srv.URL), WithRetries(0))
+	out, err := c.Wallets.PayInHistory(context.Background(), WalletPayInHistoryQuery{
+		Address: "TQrY8bYc2yQ8sM8nJ1sZ9c2Zx7L2wq7pQb",
+	})
+	if err != nil {
+		t.Fatalf("PayInHistory: %v", err)
+	}
+	if path != "/v1/wallets/history" {
+		t.Errorf("path = %q", path)
+	}
+
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(body), &sent); err != nil {
+		t.Fatalf("body is not json: %v (%s)", err, body)
+	}
+	if len(sent) != 1 || sent["address"] != "TQrY8bYc2yQ8sM8nJ1sZ9c2Zx7L2wq7pQb" {
+		t.Errorf("body must carry the address alone when nothing else is set, got %v", sent)
+	}
+
+	if len(out.Items) != 1 {
+		t.Fatalf("items = %d", len(out.Items))
+	}
+	p := out.Items[0]
+	if p.OrderID != "invoice-1002" || p.Status != PayInStatusPaid || !p.Succeeded() {
+		t.Errorf("order = %+v, want the pay-in record the history endpoints return", p)
+	}
+	if p.PaymentNetwork != ChainTronMainnet || p.AmountCrypto != "10.5" {
+		t.Errorf("order = %+v", p)
+	}
+	if out.Meta.Page != 1 || out.Meta.PageSize != 20 || out.Meta.Total != 1 {
+		t.Errorf("meta = %+v", out.Meta)
+	}
+
+	// The date bounds and the pagination go on the wire under the platform's own
+	// names when they are set.
+	var filteredBody string
+	srv2 := captureServer(t, `{"items":[],"meta":{"page":2,"page_size":50,"total":0}}`, &path, &filteredBody)
+	c2, _ := New("m", "k", WithBaseURL(srv2.URL), WithRetries(0))
+	page, err := c2.Wallets.PayInHistory(context.Background(), WalletPayInHistoryQuery{
+		Address:  "0xabc",
+		DateFrom: "2026-01-01T00:00:00+00:00",
+		DateTo:   "2026-02-01T00:00:00+00:00",
+		Page:     2,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("PayInHistory: %v", err)
+	}
+	for _, want := range []string{
+		`"address":"0xabc"`,
+		`"date_from":"2026-01-01T00:00:00+00:00"`,
+		`"date_to":"2026-02-01T00:00:00+00:00"`,
+		`"page":2`,
+		`"page_size":50`,
+	} {
+		if !strings.Contains(filteredBody, want) {
+			t.Errorf("body missing %s: %s", want, filteredBody)
+		}
+	}
+	// An address the project does not own is an empty page, not an error.
+	if len(page.Items) != 0 {
+		t.Errorf("items = %d, want an empty page", len(page.Items))
+	}
+}
+
 // The wallet-info shape always carries master_wallet_address, callback_url and
 // label, and sends null when there is none. A master wallet with no name has
 // none of the three; decoding must not fail, and all must read as unset.

@@ -16,18 +16,39 @@ const (
 
 // SweepHistoryQuery is the body of /v1/sweeps/history.
 type SweepHistoryQuery struct {
-	Mode     SweepMode `json:"mode,omitempty"`
-	Page     int       `json:"page,omitempty"`
-	PageSize int       `json:"page_size,omitempty"`
+	Mode SweepMode `json:"mode,omitempty"`
+
+	// Status narrows the page to one sweep status - one of the SweepStatus*
+	// constants. Left empty, every status is included, SweepStatusSkipped ones
+	// among them.
+	Status string `json:"status,omitempty"`
+
+	// Search is a substring match on the wallet address, the sweep and gas-pump
+	// transaction hashes, and the task ID.
+	Search string `json:"search,omitempty"`
+
+	Page     int `json:"page,omitempty"`
+	PageSize int `json:"page_size,omitempty"`
 }
 
 // SweepWalletHistoryQuery is the body of /v1/sweeps/wallet/history — same
 // shape plus the wallet address filter.
 type SweepWalletHistoryQuery struct {
-	Address  string    `json:"address"`
-	Mode     SweepMode `json:"mode,omitempty"`
-	Page     int       `json:"page,omitempty"`
-	PageSize int       `json:"page_size,omitempty"`
+	Address string    `json:"address"`
+	Mode    SweepMode `json:"mode,omitempty"`
+
+	// Status narrows the page to one sweep status - one of the SweepStatus*
+	// constants. Left empty, every status is included, SweepStatusSkipped ones
+	// among them.
+	Status string `json:"status,omitempty"`
+
+	// Search is a substring match on the sweep and gas-pump transaction hashes
+	// and the task ID. The wallet is already fixed by Address, so unlike
+	// [SweepHistoryQuery.Search] it does not match addresses.
+	Search string `json:"search,omitempty"`
+
+	Page     int `json:"page,omitempty"`
+	PageSize int `json:"page_size,omitempty"`
 }
 
 // Sweep is one transit→master movement.
@@ -47,17 +68,27 @@ type Sweep struct {
 	TypeWork string `json:"type_work,omitempty"`
 
 	// SweepConfirmations is how many confirmations the sweep transaction had
-	// when the platform last looked, and CompletedAt when it reached the
-	// network's confirmation target.
+	// when the platform last looked. Above zero is the settlement signal.
 	//
-	// Status tells the two apart. "broadcasted" means the transaction is out
-	// and not yet confirmed; "completed" means confirmed. Until the platform
-	// started reporting broadcast and confirmation separately, "completed"
-	// meant only "sent, and no failure observed within three minutes" - so a
-	// sweep could read completed while its transaction was still unconfirmed
-	// or had been dropped.
+	// Status tells sent from settled. "broadcasted" means the transaction is
+	// out and not yet confirmed; "completed" means confirmed. Until the
+	// platform started reporting broadcast and confirmation separately,
+	// "completed" meant only "sent, and no failure observed within three
+	// minutes" - so a sweep could read completed while its transaction was
+	// still unconfirmed or had been dropped. The confirmation count separates
+	// the two.
 	SweepConfirmations uint32 `json:"sweep_confirmations,omitempty"`
-	CompletedAt        string `json:"completed_at,omitempty"`
+
+	// CompletedAt is stamped when the sweep reached a TERMINAL OUTCOME -
+	// FAILURES INCLUDED, and skipped sweeps too. It is empty while the sweep is
+	// still in flight, but its presence says only that the sweep finished, NOT
+	// that it succeeded: booking money as received because CompletedAt is set
+	// books failed sweeps as income.
+	//
+	// To tell settlement apart, check SweepConfirmations is above zero, or take
+	// ConfirmedAt from the sweep webhook - which exists as a separate field for
+	// exactly this reason.
+	CompletedAt string `json:"completed_at,omitempty"`
 
 	// Fees. TotalFeeUSD is the whole cost of the sweep; the gas-pump half is
 	// the funding transfer that pays for it on chains that need one. The
@@ -83,7 +114,8 @@ type Sweep struct {
 	GasFeeFiat     string `json:"gas_fee_fiat,omitempty"`
 	ServiceFeeFiat string `json:"service_fee_fiat,omitempty"`
 	// Deprecated: never populated - sweep history carries created_at and, once
-	// confirmed, completed_at.
+	// the sweep reaches a terminal outcome, completed_at. See CompletedAt: that
+	// outcome may be a failure, so it is not a settlement timestamp.
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
@@ -161,16 +193,44 @@ const (
 	SweepModeThreshold = "threshold"
 )
 
-// Who pays the gas for a sweep.
+// Who covers a shortfall of the chain's native coin when a sweep has to pay
+// for itself.
 //
-//   - SweepFeeModeClient: taken from the swept wallet itself.
-//   - SweepFeeModeService: paid by the platform's service wallet.
-//   - SweepFeeModeMix: the service wallet funds the gas and the cost is
-//     reclaimed from the sweep.
+// A deposit wallet that already holds enough native coin pays for its own
+// transfer, whatever the mode - none of this applies until it does not. The
+// mode only decides where the missing amount comes from:
+//
+//   - SweepFeeModeClient: from your own master wallet.
+//   - SweepFeeModeService: from the platform, and THE COST IS BILLED TO YOUR
+//     API CREDITS.
+//   - SweepFeeModeMix: THE DEFAULT. Tries client first and falls back to
+//     service when the master wallet cannot cover it.
 const (
 	SweepFeeModeClient  = "client"
 	SweepFeeModeService = "service"
 	SweepFeeModeMix     = "mix"
+)
+
+// What is bought to pay for a TRON transfer. TRON only: the value is carried
+// and ignored on every other chain.
+//
+//   - SweepGasSourceNative: the wallet burns its own TRX for energy.
+//   - SweepGasSourceRented: the platform supplies the energy, so nothing is
+//     burnt. The energy is billed to your API credits after the transfer is on
+//     chain, whatever the fee mode.
+//
+// GasSource answers WHAT IS BOUGHT where the fee mode answers WHO PAYS the
+// network fees, and the two are independent - energy can be supplied under any
+// fee mode.
+//
+// Not setting it is not the same as setting SweepGasSourceNative: a wallet that
+// has never chosen one gets the platform default, which is
+// SweepGasSourceRented. So energy is supplied, and billed, without anybody
+// switching it on. To have the wallet burn its own TRX, send
+// SweepGasSourceNative explicitly.
+const (
+	SweepGasSourceNative = "native"
+	SweepGasSourceRented = "rented"
 )
 
 // SweepPolicy is a resolved set of sweep rules.
@@ -179,6 +239,13 @@ type SweepPolicy struct {
 	// ThresholdUSD is meaningful only when TypeWork is SweepModeThreshold.
 	ThresholdUSD string `json:"threshold_amount_usd,omitempty"`
 	FeeMode      string `json:"fee_mode"`
+	// GasSource is SweepGasSourceNative or SweepGasSourceRented - see those
+	// constants for what the two buy and what they cost.
+	//
+	// On SweepSettings.Effective it is always a concrete value: read it to see
+	// what will actually happen, and remember that a wallet nobody configured
+	// reads as SweepGasSourceRented.
+	GasSource string `json:"gas_source,omitempty"`
 	// Source says where the mode came from: wallet_network, wallet, project or
 	// default. Present on SweepSettings.Effective, which is the only place the
 	// question arises.
@@ -195,6 +262,11 @@ type SweepOverride struct {
 	TypeWork     *string `json:"type_work"`
 	ThresholdUSD *string `json:"threshold_amount_usd"`
 	FeeMode      *string `json:"fee_mode"`
+	// GasSource nil means this layer does not decide - the value is INHERITED,
+	// not switched off. A wallet that decides nothing still gets energy supplied
+	// and billed, because the platform default is SweepGasSourceRented. Read
+	// SweepSettings.Effective.GasSource for what will actually happen.
+	GasSource *string `json:"gas_source"`
 	// Source is who wrote it: merchant or operator.
 	Source string `json:"source"`
 	// Locked means an operator pinned this policy. While it is set, a merchant
@@ -237,12 +309,24 @@ type SweepSettingsUpdate struct {
 	NetworkCode Chain  `json:"network_code,omitempty"`
 
 	// Fields names what this call is writing: type_work, threshold_amount_usd,
-	// fee_mode. Optional when every field being written carries a value.
+	// fee_mode, gas_source. Optional when every field being written carries a
+	// value.
 	Fields []string `json:"fields,omitempty"`
 
 	TypeWork     *string `json:"type_work,omitempty"`
 	ThresholdUSD *string `json:"threshold_amount_usd,omitempty"`
 	FeeMode      *string `json:"fee_mode,omitempty"`
+	// GasSource is SweepGasSourceNative or SweepGasSourceRented. TRON only;
+	// carried and ignored on other chains.
+	//
+	// Leaving it nil leaves the stored value untouched - it does NOT mean
+	// "native". Where nothing is stored the platform default applies, which is
+	// SweepGasSourceRented: energy is supplied and billed to your API credits
+	// without anybody switching it on. Send SweepGasSourceNative to opt out.
+	//
+	// To drop the override and inherit again, name "gas_source" in Fields and
+	// leave this nil.
+	GasSource *string `json:"gas_source,omitempty"`
 }
 
 // Settings returns the auto-sweep policy in force for one wallet, together with

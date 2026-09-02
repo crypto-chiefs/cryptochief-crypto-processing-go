@@ -5,6 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-02
+
+### Added
+
+- `Wallets.PayInHistory` — `POST /v1/wallets/history`, every pay-in that used
+  one deposit address. A deposit wallet can serve several orders over its
+  lifetime, and this is the list of them, for when a payer gives you the address
+  but not the order. The rows are the same `PayIn` records and the same
+  `HistoryMeta` page as `PayIns.History`, not a parallel type. The address is
+  matched case-insensitively, so either spelling of an EVM address works, and
+  an address that is not your project's yields an empty page rather than an
+  error.
+- `Currencies.Fiats` — `POST /v1/currencies/fiats`, every fiat the platform can
+  price an order in and quote a rate against: the codes to populate a currency
+  selector with, and the values `Currencies.FiatToCrypto` and a FIAT-mode
+  pay-in's `Currency` accept. Like `/v1/blockchains/list` it answers with a bare
+  JSON array rather than the usual `{"items": …}` envelope, so the method
+  returns a `[]FiatCurrency`.
+- `Currencies.Cryptos` — `POST /v1/currencies/cryptos`, every crypto ticker the
+  platform has a rate for, against USDT, with `ByExchange` saying which exchange
+  carries which — the map `ConvertRequest.Provider` picks from.
+
+  **Rate availability is not payment availability.** A ticker here is one the
+  platform can put a price on; it says nothing about whether the project takes
+  deposits, sweeps or payouts in it. That list is
+  `Blockchain.ContractsAvailable`, and an asset picker built from this one
+  offers customers assets orders will refuse.
+- `Blockchain.SupportedChains` — `POST /v1/blockchains/list`, the chains the
+  platform's scanner is currently connected to. It answers with a bare JSON
+  array rather than the usual `{"items": …}` envelope, so the method returns a
+  `[]SupportedChain`. `Name` is the CHAIN code; `Type` is the scanner's
+  lowercase protocol family (`"evm"`, `"tron"`), which is not the `ChainFamily`
+  spelling (`"EVM"`) responses elsewhere carry.
+- `Blockchain.ContractsList` — `POST /v1/blockchain/contracts/list`, every coin
+  and token the platform supports on every network, whatever this project has
+  enabled: the catalogue to build a "which assets could we turn on" picker
+  from. Same `AvailableContract` items as `Blockchain.ContractsAvailable`.
+- `ChainFamily` and `IsTest` on `AvailableContract`. Both are sent by the
+  catalogue and by the project's own list and were being dropped, so a picker
+  had no way to tell a devnet asset from a real one. A native coin's
+  `Contract` stays the empty string it arrives as.
+- `Status` and `Search` on `SweepHistoryQuery` and `SweepWalletHistoryQuery`.
+  `Status` narrows a page to one sweep status; left empty, every status is
+  included, `skipped` ones among them. `Search` is a substring match — on the
+  project-wide history it matches the wallet address, the sweep and gas-pump
+  transaction hashes and the task ID; on the wallet variant, the hashes and the
+  task ID.
+- `GasSource` on the sweep settings, in all three layers and on the write:
+  `SweepPolicy.GasSource` (concrete on `Effective`, so reading it tells you what
+  will actually happen), `SweepOverride.GasSource` (a `*string`, `nil` meaning
+  this layer does not decide — inherited, not switched off) and
+  `SweepSettingsUpdate.GasSource`. `"gas_source"` is now accepted in the
+  `Fields` mask, which is how the override is dropped so the wallet inherits
+  again. `SweepGasSourceNative` and `SweepGasSourceRented` name the two values.
+
+  It is TRON-only, and it answers a different question from `FeeMode`: what is
+  bought for the transfer, not who pays its network fees. **Not setting it is
+  not the same as setting `native`.** A wallet that has never chosen one gets
+  the platform default, which is `rented` — the platform supplies the energy and
+  bills it to your API credits, under any fee mode, without anybody having
+  switched it on. Send `SweepGasSourceNative` explicitly to have the wallet burn
+  its own TRX.
+
+### Fixed
+
+- `AvailableContract.IsTest` no longer carries `omitempty`. It is a `bool`, so
+  the tag dropped `is_test: false` whenever a row was re-marshalled — collapsing
+  "this is a mainnet asset" into "the field is absent", on the one field that
+  separates a test asset from a real one. A mainnet row now re-serialises as
+  `"is_test": false`. No other bool added in this release was affected: the
+  `omitempty` bools on `EstimatePayoutRequest` are request fields, where
+  omitting a false is the intended wire shape.
+- `Blockchain.SupportedChains`, `Currencies.Fiats` and `Currencies.Cryptos`
+  tolerate a `null` body. The three services build their result from a Go slice,
+  so an **empty** result marshals as a literal `null` rather than `[]`. A method
+  whose signature promises a list must answer that with an empty list, and these
+  now do: `SupportedChains` and `Fiats` return an empty, non-nil slice, and
+  `Cryptos` returns `Tickers`, `ByExchange` and every list inside `ByExchange`
+  usable and empty — so `ByExchange` can be assigned to and not only read.
+  Nothing errors, nothing decodes short, and re-marshalling a result writes `[]`
+  and `{}` rather than passing the `null` on.
+- The README's payout-webhook sample no longer reads `evt.TxID`, a field
+  `PayoutWebhookEvent` has never had — the sample did not compile. A payout can
+  draw on several source wallets, so the platform sends one `txid` per entry in
+  `sources` and no top-level hash; the sample now says so and logs fields that
+  exist.
+
+### Changed
+
+- The `SweepFeeMode*` doc comment described the wrong thing. The fee mode does
+  not say who pays for a sweep outright: a deposit wallet holding enough of the
+  chain's native coin pays for its own transfer whatever the mode, and the mode
+  only decides who covers a **shortfall**. `client` takes it from your own master
+  wallet — not from the swept wallet. `service` has the platform supply it **and
+  bills the cost to your API credits**, which the comment omitted entirely.
+  `mix` is **the default**, and it tries `client` first and falls back to
+  `service` when the master wallet cannot cover it — it does not fund the gas
+  from a service wallet and reclaim it from the sweep, which is what the comment
+  claimed. Constants and wire values are unchanged.
+- `Sweep.CompletedAt` is documented as what it is: stamped when the sweep reached
+  a **terminal outcome, failures and skips included**. "Absent while still in
+  flight" was true and dangerously incomplete — a failed sweep is not in flight
+  either, so it carries `completed_at` too, and a reader who took presence for
+  settlement would book a failed sweep as money received. That is why the sweep
+  webhook carries a separate `ConfirmedAt` instead of reusing it. To tell
+  settlement apart, check `SweepConfirmations` is above zero, or take
+  `ConfirmedAt` from the `sweep.confirmed` webhook.
+
 ## [0.6.0] - 2026-09-02
 
 ### Added

@@ -73,6 +73,26 @@ type ListWalletsResponse struct {
 	Items []Wallet `json:"items"`
 }
 
+// WalletPayInHistoryQuery is the body of /v1/wallets/history: the pay-ins that
+// used one deposit address, narrowed from the project-wide [HistoryQuery] to a
+// single wallet.
+//
+// Address is required. It is matched case-insensitively, so either spelling of
+// an EVM address works.
+type WalletPayInHistoryQuery struct {
+	Address string `json:"address"`
+
+	// DateFrom and DateTo bound the order's creation date, formatted
+	// YYYY-MM-DDTHH:MM:SS±HH:MM — the same format the other history endpoints
+	// take.
+	DateFrom string `json:"date_from,omitempty"`
+	DateTo   string `json:"date_to,omitempty"`
+
+	// Page defaults to 1 and PageSize to 20, capped at 100.
+	Page     int `json:"page,omitempty"`
+	PageSize int `json:"page_size,omitempty"`
+}
+
 // Generate provisions a new wallet on the requested chain family. master
 // wallets are root-of-trust; transit and static wallets attach to a master.
 // Static wallets get a fixed deposit address per-customer (with optional
@@ -104,6 +124,29 @@ func (s *WalletsService) List(ctx context.Context) (*ListWalletsResponse, error)
 func (s *WalletsService) Info(ctx context.Context, address string) (*Wallet, error) {
 	var out Wallet
 	if err := s.c.do(ctx, "/v1/wallets/info", map[string]string{"address": address}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PayInHistory returns every pay-in that used one deposit address — the same
+// records as [PayInsService.History], narrowed to a single wallet.
+//
+// Useful when a payer says they sent funds and you have the address but not the
+// order: a deposit wallet can serve several orders over its lifetime, and this
+// is the list of them.
+//
+// The rows are ordinary [PayIn] records and the page is the ordinary
+// [HistoryMeta]. Only orders belonging to your project are returned, so an
+// address you do not own yields an empty page rather than an error.
+//
+//	page, err := c.Wallets.PayInHistory(ctx, cryptochief.WalletPayInHistoryQuery{
+//	    Address:  depositAddress,
+//	    PageSize: 50,
+//	})
+func (s *WalletsService) PayInHistory(ctx context.Context, q WalletPayInHistoryQuery) (*PayInHistoryResponse, error) {
+	var out PayInHistoryResponse
+	if err := s.c.do(ctx, "/v1/wallets/history", q, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

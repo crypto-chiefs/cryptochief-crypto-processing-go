@@ -83,12 +83,12 @@ is the **signing secret** — keep it server-side.
 | Solana programs | `c.Transactions` | `SignAnchorCall`, `SignSolanaCall` |
 | TON contract calls (Jetton / NFT / text) | `c.Transactions` | `JettonTransfer`, `NFTTransfer`, `SendTONComment`, `SignTONCall` |
 | Accept incoming payments | `c.PayIns` | `Create`, `SelectAsset`, `ResetAsset`, `Cancel`, `Info`, `History` |
-| Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `RebindMaster`, `SetCallbackURL`, `SetLabel`, `DecryptPrivateKey` |
+| Wallet management + RSA decrypt | `c.Wallets` | `Generate`, `List`, `Info`, `Freeze`, `RebindMaster`, `SetCallbackURL`, `SetLabel`, `PayInHistory`, `DecryptPrivateKey` |
 | Treasury sweeps | `c.Sweeps` | `Force`, `History`, `WalletHistory`, `Settings`, `UpdateSettings` |
 | Withdrawals (read-only) | `c.Withdrawals` | `Info`, `History` |
 | Static-deposit history | `c.StaticDeposits` | `Info`, `History` |
-| On-chain queries | `c.Blockchain` | `ContractsAvailable`, `WalletBalance`, `TransactionStatus` |
-| Fiat ↔ crypto rate quote | `c.Currencies` | `FiatToCrypto`, `CryptoToFiat` |
+| On-chain queries | `c.Blockchain` | `SupportedChains`, `ContractsList`, `ContractsAvailable`, `WalletBalance`, `TransactionStatus` |
+| Fiat ↔ crypto rate quote | `c.Currencies` | `FiatToCrypto`, `CryptoToFiat`, `Fiats`, `Cryptos` |
 | Billing credits (free endpoints) | `c.Credits` | `Balance`, `Topup` |
 
 ## End-to-end example: payout with confirmation
@@ -360,7 +360,11 @@ typed handler:
 mux.Handle("/webhook/payout", cryptochief.WebhookHandler[cryptochief.PayoutWebhookEvent](
     apiKey,
     func(w http.ResponseWriter, r *http.Request, evt cryptochief.PayoutWebhookEvent) {
-        log.Printf("payout %s → %s (tx=%s)", evt.UUID, evt.Status, evt.TxID)
+        // The payout webhook carries no top-level transaction hash: a payout can
+        // draw on several source wallets, so the txids live one per entry in
+        // evt.Sources (raw JSON — decode it if you need them).
+        log.Printf("payout %s → %s (%s to %s)",
+            evt.UUID, evt.Status, evt.AmountToReceive, evt.ToAddress)
     },
 ))
 ```
@@ -585,12 +589,95 @@ s, err := c.Sweeps.UpdateSettings(ctx, cryptochief.SweepSettingsUpdate{
 Inheritance is per field: overriding the mode leaves the fee mode inherited. To
 stop overriding a field, name it in `Fields` and leave its value nil.
 
+**Who supplies the energy a TRON sweep burns?**
+`GasSource` on the same settings, TRON only: `SweepGasSourceNative` has the
+wallet burn its own TRX, `SweepGasSourceRented` has the platform supply the
+energy and bill it to your API credits. It answers *what is bought*, where
+`FeeMode` answers *who pays the network fees*, so it applies under any fee mode.
+
+**Not setting it is not the same as setting `native`.** A wallet that has never
+chosen one gets the platform default, which is `rented` — energy is supplied,
+and billed, without anybody switching it on:
+
+```go
+gas := cryptochief.SweepGasSourceNative
+s, err := c.Sweeps.UpdateSettings(ctx, cryptochief.SweepSettingsUpdate{
+    Address:   depositAddress,
+    GasSource: &gas, // burn the wallet's own TRX; omitting this changes nothing
+})
+// s.Effective.GasSource is always concrete — read it to see what will happen.
+```
+
+Read `s.Effective.GasSource` for what will actually happen. A `nil` in
+`s.Override.GasSource` means only that this layer does not decide — inherited,
+not switched off. To drop the override and inherit again, name `"gas_source"` in
+`Fields` and leave it nil.
+
+**How do I find one sweep in the history?**
+`Status` narrows a page to a single sweep status, and `Search` matches a
+substring of the wallet address, the sweep or gas-pump transaction hash, or the
+task ID — on `WalletHistory` the wallet is already fixed, so search matches the
+hashes and the task ID:
+
+```go
+page, err := c.Sweeps.History(ctx, cryptochief.SweepHistoryQuery{
+    Status: cryptochief.SweepStatusSkipped,
+    Search: depositAddress,
+})
+```
+
+Leaving `Status` empty includes every status, `SweepStatusSkipped` ones among
+them — a skipped sweep is a normal outcome (a balance under the threshold), not
+a failure.
+
 **How do I know a sweep actually settled?**
-Check `Status`. `SweepStatusBroadcasted` means the transaction is out and not yet
-confirmed; `SweepStatusCompleted` means confirmed, with `SweepConfirmations` and
-`CompletedAt` filled in. Earlier platform versions reported `completed` at
-broadcast, so a sweep could read completed while its transaction was still
-unconfirmed.
+Check `Status` together with `SweepConfirmations`. `SweepStatusBroadcasted`
+means the transaction is out and not yet confirmed; `SweepStatusCompleted` with
+`SweepConfirmations` above zero means the chain confirmed it. Earlier platform
+versions reported `completed` at broadcast, so a sweep could read completed
+while its transaction was still unconfirmed — the confirmation count is what
+separates the two.
+
+**Not `CompletedAt`.** It is stamped when the sweep reached a terminal outcome,
+failures and skips included, so its presence says the sweep finished, not that
+it succeeded — book money on it and a failed sweep becomes income. The moment
+the chain was seen holding the funds arrives separately, as `ConfirmedAt` on
+the `sweep.confirmed` webhook.
+
+**Who pays for a sweep's gas?**
+`FeeMode` on the sweep settings — but only when the deposit wallet cannot pay
+for its own transfer. A wallet already holding enough of the chain's native coin
+covers its own gas whatever the mode; the mode decides where a *shortfall* comes
+from. `SweepFeeModeClient` takes it from your own master wallet,
+`SweepFeeModeService` from the platform and **bills the cost to your API
+credits**, and `SweepFeeModeMix` — the default — tries client first and falls
+back to service when the master wallet cannot cover it.
+
+**A payer gives me an address but not an order — how do I find their payment?**
+`c.Wallets.PayInHistory(...)` lists every pay-in that used one deposit address.
+A deposit wallet can serve several orders over its lifetime, and these are the
+rows for it — the same `PayIn` records as `c.PayIns.History`, in the same paged
+envelope:
+
+```go
+page, err := c.Wallets.PayInHistory(ctx, cryptochief.WalletPayInHistoryQuery{
+    Address:  depositAddress,
+    PageSize: 50,
+})
+```
+
+The address is matched case-insensitively, so either spelling of an EVM address
+works, and an address that is not your project's yields an empty page rather
+than an error.
+
+**Which coins could I turn on, and which are on already?**
+`c.Blockchain.ContractsList(ctx)` is the platform's whole catalogue — every coin
+and token on every network — and `c.Blockchain.ContractsAvailable(ctx, network)`
+is what this project can be paid in right now. Both return the same items, so
+`IsTest` separates the test-network assets from the real ones and `ChainFamily`
+tells you which protocol an asset belongs to; a native coin's `Contract` is the
+empty string. `c.Blockchain.SupportedChains(ctx)` is one level below that: the
+chains the platform's scanner is connected to at all.
 
 **How do I keep test payments off real chains?**
 Set `Environment` on `PayIns.Create` to `cryptochief.EnvironmentTestnet` or

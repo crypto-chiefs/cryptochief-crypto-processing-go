@@ -41,12 +41,17 @@
 //   - c.PayIns         — accept incoming payments
 //   - c.Wallets        — generate (optionally labelled), list, info, freeze,
 //     re-bind to another master, rename, set/clear a static wallet's deposit
-//     webhook; decrypt RSA-encrypted private keys
-//   - c.Sweeps         — force transit→master sweep + history
+//     webhook, the pay-ins one deposit address received; decrypt RSA-encrypted
+//     private keys
+//   - c.Sweeps         — force transit→master sweep, filterable history,
+//     per-wallet auto-sweep policy
 //   - c.Withdrawals    — read-only history / info for treasury withdrawals
 //   - c.StaticDeposits — history / info for static-address deposits
-//   - c.Blockchain     — enabled assets, on-chain balance, tx status
-//   - c.Currencies     — fiat ↔ crypto rate calculator
+//   - c.Blockchain     — supported chains, the platform's asset catalogue and
+//     the project's enabled assets, on-chain balance, tx status
+//   - c.Currencies     — fiat ↔ crypto rate calculator, and the fiat codes /
+//     crypto tickers there are rates for (rate availability, not the asset
+//     catalogue — that is c.Blockchain)
 //   - c.Credits        — billing credits balance + gas-ops gate (free endpoint)
 //
 // # Contract calls without hand-encoded calldata
@@ -126,4 +131,4 @@
 package cryptochief
 
 // Version is the library version reported in the User-Agent header.
-const Version = "0.6.0"
+const Version = "0.7.0"
