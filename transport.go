@@ -116,19 +116,37 @@ type errorEnvelope struct {
 	OK    bool   `json:"ok"`
 }
 
+// parseAPIError resolves the two envelope shapes the API uses onto one
+// machine code.
+//
+// The gateway decides some refusals itself and puts the code in "error",
+// leaving "msg" for the English sentence:
+//
+//	{"ok":false,"error":"LABEL_TOO_LONG","msg":"label is longer than 255 characters"}
+//
+// The rest it relays from an upstream service, marking "error" with the
+// generic SERVICE_ERROR and carrying the code in "msg":
+//
+//	{"ok":false,"error":"SERVICE_ERROR","msg":"wallet_not_found"}
+//
+// So "error" wins unless it is that generic marker, in which case "msg"
+// holds the code. The message prefers "msg" either way.
 func parseAPIError(status int, body []byte) *APIError {
 	var env errorEnvelope
 	_ = json.Unmarshal(body, &env)
-	code := env.Msg
+	code := env.Error
+	if code == "" || code == CodeServiceError {
+		code = env.Msg
+	}
 	if code == "" {
 		code = env.Error
 	}
 	if code == "" {
 		code = fmt.Sprintf("HTTP_%d", status)
 	}
-	message := env.Error
-	if env.Msg != "" && env.Msg != env.Error {
-		message = env.Msg
+	message := env.Msg
+	if message == "" {
+		message = env.Error
 	}
 	return &APIError{
 		HTTPStatus: status,

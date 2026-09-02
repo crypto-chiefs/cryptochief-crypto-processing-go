@@ -7,10 +7,19 @@ import (
 
 // APIError is the typed form of a Crypto Chief error response.
 //
-// The API returns either {"error":"SERVICE_ERROR","msg":"<CODE>","ok":false}
-// (in which case Code is "<CODE>") or {"error":"<CODE>","ok":false} (in
-// which case Code is that value). Either way Code is the stable string
-// callers should switch on.
+// A refusal arrives in one of two shapes. The gateway's own refusals put the
+// machine code in "error" and an English sentence in "msg":
+//
+//	{"error":"LABEL_TOO_LONG","msg":"label is longer than 255 characters","ok":false}
+//
+// Refusals relayed from an upstream service mark "error" with the generic
+// SERVICE_ERROR and carry the code in "msg":
+//
+//	{"error":"SERVICE_ERROR","msg":"wallet_not_found","ok":false}
+//
+// Both resolve onto Code, so Code is the stable string callers should switch
+// on whichever shape the server used. Message keeps the human-readable text,
+// and Raw keeps the whole body.
 //
 // Use [errors.Is] against the package-level sentinels below to test for a
 // specific code:
@@ -75,9 +84,9 @@ const (
 	CodeOrderNotLive         = "ORDER_NOT_LIVE"
 	CodeAssetAlreadySelected = "ASSET_ALREADY_SELECTED"
 	CodeInvalidParams        = "INVALID_PARAMS"
-	// CodeLabelTooLong — a wallet label over 255 characters. A real machine code
-	// from the gateway, unlike the upstream refusals that arrive as SERVICE_ERROR
-	// with the detail in the message.
+	// CodeLabelTooLong — a wallet label over 255 characters. Decided by the
+	// gateway, which sends the code in "error" and the sentence in "msg";
+	// like every gateway code it reaches the caller as Code.
 	CodeLabelTooLong          = "LABEL_TOO_LONG"
 	CodeServiceError          = "SERVICE_ERROR"
 	CodeUnauthorized          = "UNAUTHORIZED"

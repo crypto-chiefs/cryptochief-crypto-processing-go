@@ -35,11 +35,17 @@ type EstimatePayoutRequest struct {
 	// AllowMultipleSources lets the API combine multiple wallets to
 	// reach the target amount.
 	AllowMultipleSources bool `json:"allow_multiple_sources,omitempty"`
-	// AutoConvert turns the payout into a swap: source asset gets converted
-	// on the fly. The estimate's ServiceOperations show the convert leg.
+	// AutoConvert would turn the payout into a swap, converting the source
+	// asset on the fly.
+	//
+	// NOT AVAILABLE YET. The field is part of the request contract, but the
+	// platform refuses any payout that sets it, answering
+	// AUTO_CONVERT_NOT_IMPLEMENTED. Convert the asset yourself and pay out
+	// what the master wallet already holds.
 	AutoConvert bool `json:"auto_convert,omitempty"`
-	// AutoConvertPolicy restricts which source assets the auto-convert may
-	// draw from (allow / exclude lists). Nil = let the API choose freely.
+	// AutoConvertPolicy would restrict which source assets the auto-convert
+	// may draw from (allow / exclude lists). Reserved alongside AutoConvert
+	// and equally unavailable.
 	AutoConvertPolicy *AssetsPolicy `json:"auto_convert_policy,omitempty"`
 	// MaxFeeAmountFiat caps the acceptable network fee (in USD-equivalent).
 	MaxFeeAmountFiat string `json:"max_fee_amount_fiat,omitempty"`

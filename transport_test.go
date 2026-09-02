@@ -91,6 +91,145 @@ func TestTransport_ParsesErrorEnvelope(t *testing.T) {
 	}
 }
 
+// TestParseAPIError_BothEnvelopeShapes pins the resolution rule across the
+// two shapes the API uses: the gateway's own refusals carry the machine code
+// in "error" and an English sentence in "msg", while refusals relayed from
+// upstream mark "error" as SERVICE_ERROR and carry the code in "msg". Both
+// must land in Code, and Message must keep the human text.
+func TestParseAPIError_BothEnvelopeShapes(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		body        string
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:        "gateway refusal keeps its code in error",
+			status:      http.StatusBadRequest,
+			body:        `{"ok":false,"error":"LABEL_TOO_LONG","msg":"label is longer than 255 characters"}`,
+			wantCode:    CodeLabelTooLong,
+			wantMessage: "label is longer than 255 characters",
+		},
+		{
+			name:        "upstream refusal keeps its code in msg",
+			status:      http.StatusBadRequest,
+			body:        `{"ok":false,"error":"SERVICE_ERROR","msg":"wallet_not_found"}`,
+			wantCode:    "wallet_not_found",
+			wantMessage: "wallet_not_found",
+		},
+		{
+			name:        "gateway billing refusal",
+			status:      http.StatusPaymentRequired,
+			body:        `{"ok":false,"error":"INSUFFICIENT_CREDITS","msg":"not enough credits to cover gas"}`,
+			wantCode:    CodeInsufficientCredits,
+			wantMessage: "not enough credits to cover gas",
+		},
+		{
+			name:        "SERVICE_ERROR with no detail stays SERVICE_ERROR",
+			status:      http.StatusBadGateway,
+			body:        `{"ok":false,"error":"SERVICE_ERROR"}`,
+			wantCode:    CodeServiceError,
+			wantMessage: CodeServiceError,
+		},
+		{
+			name:        "error only",
+			status:      http.StatusBadRequest,
+			body:        `{"ok":false,"error":"UNKNOWN_FIELD"}`,
+			wantCode:    "UNKNOWN_FIELD",
+			wantMessage: "UNKNOWN_FIELD",
+		},
+		{
+			name:        "unparseable body falls back to the status",
+			status:      http.StatusInternalServerError,
+			body:        `<html>502 Bad Gateway</html>`,
+			wantCode:    "HTTP_500",
+			wantMessage: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			apiErr := parseAPIError(tc.status, []byte(tc.body))
+			if apiErr.Code != tc.wantCode {
+				t.Errorf("Code = %q, want %q", apiErr.Code, tc.wantCode)
+			}
+			if apiErr.Message != tc.wantMessage {
+				t.Errorf("Message = %q, want %q", apiErr.Message, tc.wantMessage)
+			}
+			if apiErr.HTTPStatus != tc.status {
+				t.Errorf("HTTPStatus = %d, want %d", apiErr.HTTPStatus, tc.status)
+			}
+			// Raw must keep the whole body — nothing is dropped on the way.
+			if string(apiErr.Raw) != tc.body {
+				t.Errorf("Raw = %q, want %q", apiErr.Raw, tc.body)
+			}
+		})
+	}
+}
+
+// TestTransport_GatewayCodeReachesCaller is the end-to-end form: a refusal
+// the gateway decided itself must arrive with the constant in Code, must
+// match the sentinel through errors.Is, and must still carry the English
+// sentence for a human to read.
+func TestTransport_GatewayCodeReachesCaller(t *testing.T) {
+	const sentence = "label is longer than 255 characters"
+	body := `{"ok":false,"error":"LABEL_TOO_LONG","msg":"` + sentence + `"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	c, _ := New("m", "k", WithBaseURL(srv.URL), WithRetries(0))
+	_, err := c.Wallets.SetLabel(context.Background(), "0xabc", strings.Repeat("x", 256))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	// The constant the changelog advertises must actually match.
+	if apiErr.Code != CodeLabelTooLong {
+		t.Errorf("Code = %q, want %q", apiErr.Code, CodeLabelTooLong)
+	}
+	// The human sentence is still there, not overwritten by the code.
+	if apiErr.Message != sentence {
+		t.Errorf("Message = %q, want %q", apiErr.Message, sentence)
+	}
+	// ...and it is in the Error() string, so a bare %v still reads well.
+	if !strings.Contains(err.Error(), sentence) {
+		t.Errorf("Error() lost the message: %s", err)
+	}
+	if string(apiErr.Raw) != body {
+		t.Errorf("Raw = %q, want %q", apiErr.Raw, body)
+	}
+}
+
+// TestTransport_SentinelMatchesGatewayCode confirms errors.Is now fires for
+// a gateway-decided code, not only for the upstream-relayed ones.
+func TestTransport_SentinelMatchesGatewayCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w,
+			`{"ok":false,"error":"DEBT_LIMIT_EXCEEDED","msg":"outstanding debt exceeds the 50 USD limit"}`)
+	}))
+	defer srv.Close()
+
+	c, _ := New("m", "k", WithBaseURL(srv.URL), WithRetries(0))
+	_, err := c.Payouts.Info(context.Background(), "u")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrDebtLimitExceeded) {
+		t.Errorf("errors.Is(ErrDebtLimitExceeded) should match, got %v", err)
+	}
+	if errors.Is(err, ErrInsufficientFunds) {
+		t.Error("errors.Is must not match an unrelated sentinel")
+	}
+}
+
 func TestTransport_RetriesOn5xx(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
