@@ -19,6 +19,13 @@ var ErrInvalidSignature = errors.New("cryptochief: invalid webhook signature")
 // signature header on outgoing webhooks.
 const WebhookHeader = "Signature"
 
+// WebhookDeliveryHeader carries the delivery's uuid on every webhook the
+// platform sends. It is constant across every attempt and resend of one
+// delivery - use it as the idempotency key of your receiver - and it is what
+// [WebhooksService.Info] and [WebhooksService.Resend] take. Keep it when you
+// log an incoming webhook: there is no other way to name a delivery later.
+const WebhookDeliveryHeader = "X-Webhook-Delivery"
+
 // WebhookSenderIPs lists the IP addresses Crypto Chief delivers webhooks
 // from. Whitelist these in front of any handler that mutates state.
 var WebhookSenderIPs = []string{

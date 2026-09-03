@@ -60,6 +60,7 @@ type Client struct {
 	Blockchain     *BlockchainService
 	Currencies     *CurrenciesService
 	Credits        *CreditsService
+	Webhooks       *WebhooksService
 }
 
 type retryConfig struct {
@@ -214,6 +215,7 @@ func New(merchantID, apiKey string, opts ...Option) (*Client, error) {
 	c.Blockchain = &BlockchainService{c: c}
 	c.Currencies = &CurrenciesService{c: c}
 	c.Credits = &CreditsService{c: c}
+	c.Webhooks = &WebhooksService{c: c}
 
 	return c, nil
 }

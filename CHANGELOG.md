@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-03
+
+### Added
+
+- `Client.Webhooks` — the platform's OUTBOUND webhooks, the deliveries it made to
+  your endpoint. `Info` reads one delivery: status, every attempt with the HTTP
+  status, duration, and **the body your endpoint answered** (capped, with a
+  truncation flag), and the payload that was sent. `Resend` re-fires one
+  delivery; `ResendStaticDeposit` re-fires the newest webhook of a static
+  deposit by the deposit's own uuid. Same routes, bodies and refusal codes as
+  the white-label platform (`/v1/webhooks/info`, `/v1/webhooks/resend`,
+  `/v1/static-deposits/resend`), so one integration runs against either.
+- `WebhookDeliveryHeader` (`X-Webhook-Delivery`) — the delivery uuid now rides
+  on every webhook the platform sends. It is constant across attempts and
+  resends of one delivery, so it doubles as your receiver's idempotency key,
+  and it is the argument the new methods take. **Keep it when you log a
+  webhook** — the API has no listing of deliveries, so it is the only way to
+  name one afterwards.
+- Refusal codes `CodeDeliverySuperseded`, `CodeDeliveryInFlight`,
+  `CodeResendTooSoon`, `CodeNoDeliveries`, and `CodeNotFound`. A superseded
+  delivery — one with a newer event for the same object — cannot be resent:
+  re-sending `invoice.in_mempool` after `invoice.paid` would tell your system
+  the order went backwards. The refusal names the newer event; resend that.
+
+### Notes
+
+- A resend on this platform is **synchronous**: the POST to your endpoint
+  happens before the answer, so `Queued=true` arrives with `Status` already
+  `delivered` or `failed` for that attempt, and `NextAttemptAt` is never set.
+- A successful manual delivery is billed as `/v1/webhook/resend`; a refused one
+  is not. `Info` is priced like the other reads.
+
 ## [0.7.0] - 2026-09-02
 
 ### Added

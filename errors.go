@@ -106,6 +106,26 @@ const (
 	CodeCallsNotAllowed       = "CALLS_NOT_ALLOWED_FOR_TRANSFER"
 	CodeContractCallsUnsupp   = "CONTRACT_CALLS_UNSUPPORTED_ON_NETWORK"
 	CodeNetworkError          = "NETWORK_ERROR"
+
+	// CodeNotFound — the object does not exist OR is not this project's; the two
+	// are deliberately indistinguishable.
+	CodeNotFound = "NOT_FOUND"
+
+	// Webhook resend refusals (Client.Webhooks). All decided by the platform's
+	// webhook service and relayed in the gateway's own envelope, so they reach
+	// the caller as Code.
+	//
+	//   - CodeDeliverySuperseded — a newer event exists for the same object; only
+	//     the latest event may be resent. Permanent.
+	//   - CodeDeliveryInFlight — a worker holds the delivery, or it is already
+	//     scheduled for an automatic retry.
+	//   - CodeResendTooSoon — resent under a minute ago (HTTP 429, Retry-After).
+	//   - CodeNoDeliveries — the static deposit never had a webhook queued: it
+	//     arrived on a wallet with no callback_url.
+	CodeDeliverySuperseded = "DELIVERY_SUPERSEDED"
+	CodeDeliveryInFlight   = "DELIVERY_IN_FLIGHT"
+	CodeResendTooSoon      = "RESEND_TOO_SOON"
+	CodeNoDeliveries       = "NO_DELIVERIES"
 )
 
 // Sentinel error values — use with errors.Is. (Pointer identity does not
