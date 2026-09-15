@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	// "value" is in BASE units (wei). Convert from a human amount with
@@ -60,9 +60,10 @@ func main() {
 	}
 	fmt.Printf("broadcasted: status=%s tx_hash=%s\n", exec.Status, exec.TxHash)
 
+	// Confirmed comes at RequiredConfirmations; Timeout must cover that depth.
 	final, err := cryptochief.WaitForTransaction(ctx, c, signed.UUID, cryptochief.PollOptions{
 		Interval: 5 * time.Second,
-		Timeout:  8 * time.Minute,
+		Timeout:  15 * time.Minute,
 	})
 	if err != nil {
 		// The helper returns a nil snapshot when no poll ever succeeded, so
@@ -73,8 +74,9 @@ func main() {
 		}
 		log.Fatalf("wait: last status=%s err=%v", status, err)
 	}
-	fmt.Printf("terminal: status=%s fee=%s ($%s)\n",
-		final.Status, final.ActualFee, final.ActualFeeFiat)
+	fmt.Printf("terminal: status=%s tx=%s confirmations=%d/%d\n",
+		final.Status, final.TxHash,
+		final.Confirmations, final.RequiredConfirmations)
 }
 
 func mustEnv(name string) string {

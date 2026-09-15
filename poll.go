@@ -7,17 +7,24 @@ import (
 	"time"
 )
 
-// PollOptions tunes the [WaitForPayout] / [WaitForTransaction] helpers.
-// The zero value is fine for everyday use (5-second interval, 10-minute
-// timeout).
+// PollOptions tunes the [WaitForPayout] / [WaitForTransaction] /
+// [WaitForPayIn] helpers.
+//
+// Defaults: 5-second interval; 90-minute timeout for WaitForPayout, 10 minutes
+// for the others. Timeout must cover RequiredConfirmations for the network;
+// UTXO networks need tens of minutes.
 type PollOptions struct {
-	// Interval between polls. Defaults to 5s. Crypto Chief expects callers
-	// to be reasonable here — block confirmation is several seconds at best.
+	// Interval between polls. Defaults to 5s.
 	Interval time.Duration
-	// Timeout bounds the whole wait. Defaults to 10m. Use the context
-	// instead if you want a hard ceiling shared with the rest of your stack.
+	// Timeout bounds the whole wait. The context deadline also applies.
 	Timeout time.Duration
 }
+
+// Default poll timeouts.
+const (
+	defaultPollTimeout   = 10 * time.Minute
+	defaultPayoutTimeout = 90 * time.Minute
+)
 
 func (o PollOptions) interval() time.Duration {
 	if o.Interval <= 0 {
@@ -28,17 +35,26 @@ func (o PollOptions) interval() time.Duration {
 
 func (o PollOptions) timeout() time.Duration {
 	if o.Timeout <= 0 {
-		return 10 * time.Minute
+		return defaultPollTimeout
 	}
 	return o.Timeout
+}
+
+// withDefaultTimeout returns o with Timeout set to d when it is unset.
+func (o PollOptions) withDefaultTimeout(d time.Duration) PollOptions {
+	if o.Timeout <= 0 {
+		o.Timeout = d
+	}
+	return o
 }
 
 // WaitForPayout polls /payout/info until the record reaches a terminal state
 // (paid / failed / expired / cancel) or the context / timeout elapses. The
 // last seen state is returned even on timeout, so callers can decide whether
-// to retry.
+// to retry. A payout is paid only at RequiredConfirmations; a timeout does not
+// mean the payout failed.
 func WaitForPayout(ctx context.Context, c *Client, uuid string, opts PollOptions) (*PayoutInfo, error) {
-	return pollUntilTerminal(ctx, opts,
+	return pollUntilTerminal(ctx, opts.withDefaultTimeout(defaultPayoutTimeout),
 		func(ctx context.Context) (*PayoutInfo, error) { return c.Payouts.Info(ctx, uuid) },
 		func(p *PayoutInfo) bool { return p.IsTerminal() })
 }

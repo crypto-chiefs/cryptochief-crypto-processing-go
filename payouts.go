@@ -6,15 +6,37 @@ import "context"
 type PayoutsService struct{ c *Client }
 
 // Payout status values surface in PayoutInfo.Status. Terminal: paid (ok),
-// failed/system_fail/expired/cancel (fail).
+// failed/system_fail/expired/cancel (fail). A payout reads
+// PayoutStatusConfirmCheck until every source reaches
+// PayoutInfo.RequiredConfirmations, then paid.
 const (
-	PayoutStatusQueue      = "queue"
-	PayoutStatusProcess    = "process"
-	PayoutStatusPaid       = "paid"
-	PayoutStatusFailed     = "failed"
+	// PayoutStatusQueue: accepted, not started.
+	PayoutStatusQueue = "queue"
+	// PayoutStatusRefueling: gas top-up of a source wallet in progress.
+	PayoutStatusRefueling = "refueling"
+	// PayoutStatusRefuelConfirmed: the source wallets have gas; the payout
+	// transactions are sent next.
+	PayoutStatusRefuelConfirmed = "refuel_confirmed"
+	// PayoutStatusSending: the payout transactions are being sent.
+	PayoutStatusSending = "sending"
+	// PayoutStatusBroadcasting: waiting to be broadcast. EVM networks only.
+	PayoutStatusBroadcasting = "broadcasting"
+	// PayoutStatusInMempool: broadcast, waiting for a block. BTC-family
+	// networks only.
+	PayoutStatusInMempool = "in_mempool"
+	// PayoutStatusConfirmCheck: sent to the network, below
+	// RequiredConfirmations. Confirmations is 0 while any source's transaction
+	// is not yet in a block.
+	PayoutStatusConfirmCheck = "confirm_check"
+	// PayoutStatusPaid: every source reached RequiredConfirmations. Final.
+	PayoutStatusPaid = "paid"
+	// PayoutStatusSystemFail: failed. Final.
 	PayoutStatusSystemFail = "system_fail"
-	PayoutStatusExpired    = "expired"
-	PayoutStatusCancel     = "cancel"
+
+	PayoutStatusProcess = "process"
+	PayoutStatusFailed  = "failed"
+	PayoutStatusExpired = "expired"
+	PayoutStatusCancel  = "cancel"
 )
 
 // EstimatePayoutRequest is the body of POST /v1/payout/estimate. Used to
@@ -86,36 +108,114 @@ type EstimatePayoutResponse struct {
 	AutoConvertApplied bool             `json:"auto_convert_applied,omitempty"`
 }
 
-// PayoutFeeInfo carries the fee numbers shown by /payout/estimate.
+// PayoutFeeInfo carries the fee numbers of a payout: on Estimate, Execute, Info
+// and History.
 type PayoutFeeInfo struct {
-	FeeMode        string `json:"fee_mode"`
-	EstimatedFiat  string `json:"estimated_fiat"`
-	EstimatedCoin  string `json:"estimated_coin"`
+	FeeMode       string `json:"fee_mode"`
+	EstimatedFiat string `json:"estimated_fiat"`
+	// LimitFiat is the request's MaxFeeAmountFiat, in LimitCurrency.
+	LimitFiat     string `json:"limit_fiat,omitempty"`
+	LimitCurrency string `json:"limit_currency,omitempty"`
+	// TotalFeePaidFiat is the fee paid, once known. Not on Estimate.
+	TotalFeePaidFiat string `json:"total_fee_paid_fiat,omitempty"`
+
+	// Deprecated: never populated.
+	EstimatedCoin string `json:"estimated_coin"`
+	// Deprecated: never populated.
 	EstimatedAsset string `json:"estimated_asset,omitempty"`
 }
 
-// PayoutSource is one wallet the API plans to draw funds from.
+// PayoutSource is one source wallet of a payout, as sent by Estimate, Execute,
+// Info, History and the payout webhook.
 type PayoutSource struct {
-	Address string `json:"address"`
-	Amount  string `json:"amount"`
-	Coin    string `json:"coin,omitempty"`
+	Address      string `json:"address"`
+	Network      Chain  `json:"network,omitempty"`
+	Coin         string `json:"coin,omitempty"`
+	AmountCrypto string `json:"amount_crypto,omitempty"`
+
+	NeedRefuel   bool   `json:"need_refuel,omitempty"`
+	RefuelAmount string `json:"refuel_amount,omitempty"`
+
+	EstimatedFee     string `json:"estimated_fee,omitempty"`
+	EstimatedFeeFiat string `json:"estimated_fee_fiat,omitempty"`
+	FeePaid          string `json:"fee_paid,omitempty"`
+	FeePaidFiat      string `json:"fee_paid_fiat,omitempty"`
+
+	// TxID of this source's transaction. Empty until it is sent.
+	TxID string `json:"txid,omitempty"`
+
+	// Confirmations of this source's transaction. Optional: nil until the
+	// transaction is on chain.
+	Confirmations *int `json:"confirmations,omitempty"`
+
+	// Deprecated: not sent; use AmountCrypto.
+	Amount string `json:"amount"`
+}
+
+// PayoutServiceOperation is a platform transaction made for the payout, such
+// as a gas top-up of a source wallet.
+type PayoutServiceOperation struct {
+	Type             string `json:"type"`    // e.g. "gas_refuel"
+	Context          string `json:"context"` // e.g. "payout_prepare"
+	Status           string `json:"status"`
+	Network          Chain  `json:"network"`
+	Coin             string `json:"coin"` // the chain's native coin
+	AmountNative     string `json:"amount_native"`
+	FromAddress      string `json:"from_address"`
+	ToAddress        string `json:"to_address"`
+	EstimatedFee     string `json:"estimated_fee,omitempty"`
+	EstimatedFeeFiat string `json:"estimated_fee_fiat,omitempty"`
+	FeePaid          string `json:"fee_paid,omitempty"`
+	FeePaidFiat      string `json:"fee_paid_fiat,omitempty"`
+	TxID             string `json:"txid,omitempty"`
+
+	// Confirmations of this operation's transaction. Optional: nil until the
+	// transaction is on chain.
+	Confirmations *int `json:"confirmations,omitempty"`
 }
 
 // PayoutInfo is the persistent record of a single payout.
 type PayoutInfo struct {
-	UUID        string         `json:"uuid"`
-	OrderID     string         `json:"order_id"`
-	Status      string         `json:"status"`
-	Network     Chain          `json:"network"`
-	Coin        string         `json:"coin"`
-	Amount      string         `json:"amount"`
-	ToAddress   string         `json:"to_address"`
-	TxID        string         `json:"txid,omitempty"`
-	Sources     []PayoutSource `json:"sources,omitempty"`
-	URLCallback string         `json:"url_callback,omitempty"`
-	CreatedAt   string         `json:"created_at,omitempty"`
-	UpdatedAt   string         `json:"updated_at,omitempty"`
-	Error       string         `json:"error,omitempty"`
+	UUID            string         `json:"uuid"`
+	OrderID         string         `json:"order_id"`
+	UserID          string         `json:"user_id,omitempty"`
+	Status          string         `json:"status"`
+	AmountRequested string         `json:"amount_requested,omitempty"`
+	AmountToReceive string         `json:"amount_to_receive,omitempty"`
+	ToAddress       string         `json:"to_address"`
+	FeeInfo         *PayoutFeeInfo `json:"fee_info,omitempty"`
+	Sources         []PayoutSource `json:"sources,omitempty"`
+	CreatedAt       string         `json:"created_at,omitempty"`
+
+	// CompletedAt is the moment the payout turned paid, at
+	// RequiredConfirmations. Empty until then.
+	CompletedAt string `json:"completed_at,omitempty"`
+
+	// Deprecated: never populated; see Sources[].Network.
+	Network Chain `json:"network"`
+	// Deprecated: never populated; see Sources[].Coin.
+	Coin string `json:"coin"`
+	// Deprecated: never populated; use AmountRequested.
+	Amount string `json:"amount"`
+	// Deprecated: not sent; use Sources[].TxID.
+	TxID string `json:"txid,omitempty"`
+	// Deprecated: never populated.
+	URLCallback string `json:"url_callback,omitempty"`
+	// Deprecated: never populated; use CompletedAt.
+	UpdatedAt string `json:"updated_at,omitempty"`
+	// Deprecated: never populated.
+	Error string `json:"error,omitempty"`
+
+	// ServiceOperations are platform transactions made for the payout.
+	ServiceOperations []PayoutServiceOperation `json:"service_operations,omitempty"`
+
+	// Confirmations is the lowest count among Sources, 0 while a sent source's
+	// transaction is not yet on chain. Optional: nil while no source is sent.
+	Confirmations *int `json:"confirmations,omitempty"`
+
+	// RequiredConfirmations is the count every source must reach before the
+	// payout is paid. Optional: 0 when not sent.
+	RequiredConfirmations int `json:"required_confirmations,omitempty"`
 }
 
 // IsTerminal reports whether the payout reached a final state (no further

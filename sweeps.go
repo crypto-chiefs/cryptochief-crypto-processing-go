@@ -67,27 +67,18 @@ type Sweep struct {
 	// TypeWork is what triggered this sweep: momentum, threshold or force.
 	TypeWork string `json:"type_work,omitempty"`
 
-	// SweepConfirmations is how many confirmations the sweep transaction had
-	// when the platform last looked. Above zero is the settlement signal.
-	//
-	// Status tells sent from settled. "broadcasted" means the transaction is
-	// out and not yet confirmed; "completed" means confirmed. Until the
-	// platform started reporting broadcast and confirmation separately,
-	// "completed" meant only "sent, and no failure observed within three
-	// minutes" - so a sweep could read completed while its transaction was
-	// still unconfirmed or had been dropped. The confirmation count separates
-	// the two.
+	// SweepConfirmations is the sweep transaction's confirmation count. It
+	// rises while the sweep is broadcasted.
 	SweepConfirmations uint32 `json:"sweep_confirmations,omitempty"`
 
-	// CompletedAt is stamped when the sweep reached a TERMINAL OUTCOME -
-	// FAILURES INCLUDED, and skipped sweeps too. It is empty while the sweep is
-	// still in flight, but its presence says only that the sweep finished, NOT
-	// that it succeeded: booking money as received because CompletedAt is set
-	// books failed sweeps as income.
-	//
-	// To tell settlement apart, check SweepConfirmations is above zero, or take
-	// ConfirmedAt from the sweep webhook - which exists as a separate field for
-	// exactly this reason.
+	// RequiredConfirmations is the count at which the sweep turns completed.
+	RequiredConfirmations uint32 `json:"required_confirmations,omitempty"`
+
+	// CompletedAt is when the sweep was broadcast; for waiting_gas, failed and
+	// skipped, when that status was recorded. It is not updated on completed and
+	// is not a settlement signal: use [Sweep.Settled] (Status is
+	// SweepStatusCompleted and SweepConfirmations is above zero), or take
+	// ConfirmedAt from the sweep.confirmed webhook.
 	CompletedAt string `json:"completed_at,omitempty"`
 
 	// Fees. TotalFeeUSD is the whole cost of the sweep; the gas-pump half is
@@ -107,20 +98,29 @@ type Sweep struct {
 
 	CreatedAt string `json:"created_at,omitempty"`
 
-	// Deprecated: never populated. The platform reports fees under the names
-	// above; these three were guesses at a shape it does not send. Kept so
-	// existing code still compiles.
-	GasFeeHuman    string `json:"gas_fee_human,omitempty"`
-	GasFeeFiat     string `json:"gas_fee_fiat,omitempty"`
+	// Deprecated: never populated; use the fee fields above.
+	GasFeeHuman string `json:"gas_fee_human,omitempty"`
+
+	// Deprecated: never populated; use the fee fields above.
+	GasFeeFiat string `json:"gas_fee_fiat,omitempty"`
+
+	// Deprecated: never populated; use the fee fields above.
 	ServiceFeeFiat string `json:"service_fee_fiat,omitempty"`
-	// Deprecated: never populated - sweep history carries created_at and, once
-	// the sweep reaches a terminal outcome, completed_at. See CompletedAt: that
-	// outcome may be a failure, so it is not a settlement timestamp.
+
+	// Deprecated: never populated; see CreatedAt and CompletedAt.
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
-// Sweep status values. A sweep is broadcast first and confirmed after; see the
-// note on Sweep.SweepConfirmations for why the distinction matters.
+// Settled reports whether the sweep reached the master wallet: Status is
+// SweepStatusCompleted and SweepConfirmations is above zero. A completed record
+// with zero confirmations is not settled.
+func (s Sweep) Settled() bool {
+	return s.Status == SweepStatusCompleted && s.SweepConfirmations > 0
+}
+
+// Sweep status values. A sweep is broadcasted first and completed once
+// SweepConfirmations reaches RequiredConfirmations. Completed alone is not
+// settled; see [Sweep.Settled].
 const (
 	SweepStatusPending     = "pending"
 	SweepStatusWaitingGas  = "waiting_gas"

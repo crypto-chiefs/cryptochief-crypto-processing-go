@@ -70,13 +70,21 @@ func printBanner(addr string) {
 // PayOut — outbound payment lifecycle
 //
 // The webhook fires ONLY on terminal statuses: `paid` (money left your
-// treasury and is on its way) and `system_fail` (it didn't). Per-source tx
-// hashes and fees live inside evt.Sources / evt.FeeInfo (raw JSON).
+// treasury and every source reached evt.RequiredConfirmations) and
+// `system_fail` (it didn't). Per-source tx hashes, fees and confirmations live
+// inside evt.Sources / evt.FeeInfo (raw JSON); decode Sources into
+// []cryptochief.PayoutSource.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handlePayout(w http.ResponseWriter, r *http.Request, evt cryptochief.PayoutWebhookEvent) {
 	log.Printf("[payout] uuid=%s order=%s status=%s amount_requested=%s amount_to_receive=%s to=%s",
 		evt.UUID, evt.OrderID, evt.Status, evt.AmountRequested, evt.AmountToReceive, evt.ToAddress)
+	if evt.Confirmations != nil {
+		log.Printf("  confirmations=%d (lowest among sources)", *evt.Confirmations)
+	}
+	if evt.RequiredConfirmations > 0 {
+		log.Printf("  required_confirmations=%d", evt.RequiredConfirmations)
+	}
 
 	switch evt.Status {
 	case cryptochief.PayoutStatusPaid:
@@ -138,12 +146,14 @@ func handlePayIn(w http.ResponseWriter, r *http.Request, evt cryptochief.PayInWe
 //
 // Sequence (webhook fires terminal-only):  ... → confirmed | failed | expired
 // The intermediate `signed`/`broadcasted` states do NOT trigger webhooks —
-// poll Transactions.Info if you need them.
+// poll Transactions.Info if you need them. `confirmed` comes at
+// RequiredConfirmations.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handleTransaction(w http.ResponseWriter, r *http.Request, evt cryptochief.TransactionWebhookEvent) {
-	log.Printf("[transaction] uuid=%s status=%s network=%s tx=%s from=%s to=%s value=%s",
-		evt.UUID, evt.Status, evt.Network, evt.TxHash, evt.FromAddress, evt.ToAddress, evt.Value)
+	log.Printf("[transaction] uuid=%s status=%s network=%s tx=%s from=%s to=%s value=%s confirmations=%d/%d",
+		evt.UUID, evt.Status, evt.Network, evt.TxHash, evt.FromAddress, evt.ToAddress, evt.Value,
+		evt.Confirmations, evt.RequiredConfirmations)
 
 	switch evt.Status {
 	case cryptochief.TxStatusConfirmed:
@@ -202,7 +212,7 @@ func handleStaticDeposit(w http.ResponseWriter, r *http.Request, evt cryptochief
 // not the deposit - is what treasury reporting and "available to pay out"
 // should key off.
 //
-// Fires once per sweep, on confirmation only. There is no sweep.broadcasted:
+// Fires once per sweep, at RequiredConfirmations. There is no sweep.broadcasted:
 // "we sent it" is not actionable, and an event meaning "maybe" is one more
 // thing to reconcile.
 //
@@ -212,9 +222,9 @@ func handleStaticDeposit(w http.ResponseWriter, r *http.Request, evt cryptochief
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handleSweep(w http.ResponseWriter, r *http.Request, evt cryptochief.SweepWebhookEvent) {
-	log.Printf("[sweep] task=%s %s %s from=%s → master=%s tx=%s confirmations=%d trigger=%s fee_usd=%s",
+	log.Printf("[sweep] task=%s %s %s from=%s → master=%s tx=%s confirmations=%d/%d trigger=%s fee_usd=%s",
 		evt.TaskID, evt.Amount, evt.AssetSymbol, evt.WalletAddress, evt.ToAddress,
-		evt.SweepTxHash, evt.Confirmations, evt.TypeWork, evt.TotalFeeUSD)
+		evt.SweepTxHash, evt.Confirmations, evt.RequiredConfirmations, evt.TypeWork, evt.TotalFeeUSD)
 
 	// The event only ever arrives confirmed, but if you run your own finality
 	// policy, apply it here - "confirmed" is not the same number on every chain.

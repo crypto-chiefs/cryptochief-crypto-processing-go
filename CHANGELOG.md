@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-15
+
+### Added
+
+- `RequiredConfirmations` on `Sweep`, `SweepWebhookEvent`, `PayoutInfo`,
+  `PayoutWebhookEvent`, `TransactionInfo`, `TransactionWebhookEvent`,
+  `Withdrawal`.
+- `Confirmations` on `PayoutInfo` (lowest among sources), `PayoutSource`,
+  `PayoutServiceOperation`, `PayoutWebhookEvent`, `TransactionInfo`,
+  `TransactionWebhookEvent`, `Withdrawal`.
+- `Sweep.Settled`: `Status` is `SweepStatusCompleted` and `SweepConfirmations`
+  is above zero.
+- `PayoutInfo`: `UserID`, `AmountRequested`, `AmountToReceive`, `FeeInfo`,
+  `CompletedAt`, `ServiceOperations` (type `PayoutServiceOperation`).
+- `PayoutSource`: `Network`, `AmountCrypto`, `NeedRefuel`, `RefuelAmount`,
+  `EstimatedFee`, `EstimatedFeeFiat`, `FeePaid`, `FeePaidFiat`, `TxID`.
+- `PayoutFeeInfo`: `LimitFiat`, `LimitCurrency`, `TotalFeePaidFiat`.
+- `PayoutStatusRefueling`, `PayoutStatusRefuelConfirmed`, `PayoutStatusSending`,
+  `PayoutStatusBroadcasting`, `PayoutStatusInMempool`, `PayoutStatusConfirmCheck`.
+- `TransactionInfo`: `CompletedAt`, `ErrorReason`.
+- `Withdrawal`: `NeedRefuel`, `RefuelTxHash`, `RefuelStatus`, `ErrorReason`,
+  `EstimatedFeeFiat`, `ActualFeeFiat`, `FeeMode`, `CompletedAt`.
+- `WithdrawalStatus*` constants, `Withdrawal.IsTerminal`, `Withdrawal.Succeeded`.
+- Example `examples/withdrawal_status`.
+
+### Changed
+
+- **Breaking:** a payout turns `paid`, a transaction `confirmed`, a sweep and a
+  withdrawal `completed` only at `RequiredConfirmations`; set
+  `PollOptions.Timeout` to cover that depth.
+- **Breaking:** `Sweep.CompletedAt` is the broadcast time (for `waiting_gas`,
+  `failed`, `skipped`: when that status was set); use `Sweep.Settled`.
+- `WaitForPayout` default `Timeout` is 90 minutes. A timeout does not mean the
+  payout failed: do not resend it.
+
+### Deprecated
+
+Not sent by the API:
+
+- `PayoutInfo.Network`, `Coin`, `Amount` (use `AmountRequested`), `TxID` (use
+  `Sources[].TxID`), `URLCallback`, `UpdatedAt` (use `CompletedAt`), `Error`.
+- `PayoutSource.Amount` (use `AmountCrypto`).
+- `PayoutFeeInfo.EstimatedCoin`, `EstimatedAsset`.
+- `TransactionInfo.Coin`, `SignedTxHex`, `Nonce`, `ActualFee`, `ActualFeeFiat`,
+  `UpdatedAt` (use `CompletedAt`), `Error` (use `ErrorReason`).
+- `Withdrawal.Contract`, `AmountFiat`, `UpdatedAt` and `ConfirmedAt` (use
+  `CompletedAt`), `Error` (use `ErrorReason`); `WithdrawalStatusCancelled`.
+
 ## [0.8.0] - 2026-09-03
 
 ### Added

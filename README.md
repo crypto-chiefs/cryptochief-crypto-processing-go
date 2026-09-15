@@ -113,13 +113,16 @@ if err != nil {
 
 final, err := cryptochief.WaitForPayout(ctx, c, exec.UUID, cryptochief.PollOptions{
     Interval: 5 * time.Second,
-    Timeout:  5 * time.Minute,
+    Timeout:  15 * time.Minute, // must cover RequiredConfirmations for the network
 })
 if err != nil {
+    // A timeout is not a failed payout: keep the last status, do not resend.
     return err
 }
 if final.Succeeded() {
-    log.Printf("paid: tx=%s", final.TxID)
+    for _, s := range final.Sources {
+        log.Printf("paid: source=%s tx=%s", s.Address, s.TxID)
+    }
 }
 ```
 
@@ -363,6 +366,8 @@ mux.Handle("/webhook/payout", cryptochief.WebhookHandler[cryptochief.PayoutWebho
         // The payout webhook carries no top-level transaction hash: a payout can
         // draw on several source wallets, so the txids live one per entry in
         // evt.Sources (raw JSON — decode it if you need them).
+        // evt.Confirmations is the lowest count among the sources (optional).
+        // payout.paid is sent once every source reached evt.RequiredConfirmations.
         log.Printf("payout %s → %s (%s to %s)",
             evt.UUID, evt.Status, evt.AmountToReceive, evt.ToAddress)
     },
@@ -467,6 +472,7 @@ copy from:
 - [`anchor_call`](./examples/anchor_call) — Solana Anchor program invocation.
 - [`ton_jetton_transfer`](./examples/ton_jetton_transfer) — TON Jetton transfer with auto-resolved Jetton wallet.
 - [`wallet_generate`](./examples/wallet_generate) — generate a project wallet and decrypt its private key with your RSA key.
+- [`withdrawal_status`](./examples/withdrawal_status) — list treasury withdrawals, or follow one through `confirm_check` to `completed`.
 - [`webhook_server`](./examples/webhook_server) — HTTP server that verifies signatures, logs the lifecycle of each event type, and prints copy-pasteable "next action" hints with TODO stubs for your business logic.
 
 ```bash
@@ -631,18 +637,105 @@ them — a skipped sweep is a normal outcome (a balance under the threshold), no
 a failure.
 
 **How do I know a sweep actually settled?**
-Check `Status` together with `SweepConfirmations`. `SweepStatusBroadcasted`
-means the transaction is out and not yet confirmed; `SweepStatusCompleted` with
-`SweepConfirmations` above zero means the chain confirmed it. Earlier platform
-versions reported `completed` at broadcast, so a sweep could read completed
-while its transaction was still unconfirmed — the confirmation count is what
-separates the two.
+A sweep is settled when `Status` is `SweepStatusCompleted` and
+`SweepConfirmations` is above zero (`Sweep.Settled`). While the sweep is
+`SweepStatusBroadcasted`, `SweepConfirmations` rises. When it reaches
+`RequiredConfirmations`, the sweep turns `SweepStatusCompleted` and the
+`sweep.confirmed` webhook is sent once, with both numbers.
 
-**Not `CompletedAt`.** It is stamped when the sweep reached a terminal outcome,
-failures and skips included, so its presence says the sweep finished, not that
-it succeeded — book money on it and a failed sweep becomes income. The moment
-the chain was seen holding the funds arrives separately, as `ConfirmedAt` on
-the `sweep.confirmed` webhook.
+```go
+page, err := c.Sweeps.History(ctx, cryptochief.SweepHistoryQuery{})
+if err != nil {
+    return err
+}
+for _, s := range page.Items {
+    if s.Settled() { // completed and SweepConfirmations > 0
+        // settled: book it
+    } else if s.Status == cryptochief.SweepStatusBroadcasted {
+        log.Printf("sweep %s in transit: %d/%d confirmations",
+            s.TaskID, s.SweepConfirmations, s.RequiredConfirmations)
+    }
+}
+```
+
+**Not `CompletedAt`.** It is the broadcast time (for `waiting_gas`, failed and
+skipped, when that status was recorded) and is not updated on completion; it is
+not a settlement signal. Use `Status` with `SweepConfirmations` above zero, or
+`ConfirmedAt` from `sweep.confirmed`.
+
+**How many confirmations does a payout have?**
+`Sources[].Confirmations` and `ServiceOperations[].Confirmations` are `*int`,
+`nil` until the transaction is seen on chain. `PayoutInfo.Confirmations` is
+`nil` until a source is sent, then the lowest count among the sources (`0` while
+one is not in a block). `RequiredConfirmations` is optional too (`0` when not
+sent). The same fields are on `Payouts.History`,
+`Payouts.Execute` and the payout webhook, whose raw `Sources` and
+`ServiceOperations` decode into `[]cryptochief.PayoutSource` and
+`[]cryptochief.PayoutServiceOperation`.
+
+Statuses: `queue`, `refueling`, `refuel_confirmed`, `sending`, `broadcasting`
+(EVM), `in_mempool` (BTC family), `confirm_check`, `paid`, `system_fail`. A
+payout reads `PayoutStatusConfirmCheck` until every source reaches
+`RequiredConfirmations`, then turns `paid` and `payout.paid` is sent.
+`WaitForPayout` defaults to a 90-minute timeout; a timeout is not a failed
+payout.
+
+```go
+p, err := c.Payouts.Info(ctx, payoutUUID)
+if err == nil && !p.IsTerminal() && p.Confirmations != nil {
+    log.Printf("payout %s: %d of %d confirmations (lowest source)",
+        p.UUID, *p.Confirmations, p.RequiredConfirmations)
+}
+```
+
+**How many confirmations does a signed transaction have?**
+`Confirmations` and `RequiredConfirmations` are always present on
+`Transactions.Info`, `Execute`, `History` and the `transaction.*` webhook.
+`Confirmations` is `0` until the transaction is in a block, then rises while the
+status is `TxStatusBroadcasted`. At `RequiredConfirmations` the status turns
+`TxStatusConfirmed`. Webhooks are sent only on final statuses, so poll
+`Transactions.Info` to watch the count:
+
+```go
+t, err := c.Transactions.Info(ctx, txUUID)
+if err != nil {
+    return err
+}
+switch {
+case t.Succeeded():
+    // final: act on it
+case t.Status == cryptochief.TxStatusBroadcasted:
+    log.Printf("tx %s in the network: %d/%d confirmations",
+        t.UUID, t.Confirmations, t.RequiredConfirmations)
+case t.IsTerminal():
+    log.Printf("tx %s ended %s: %s", t.UUID, t.Status, t.ErrorReason)
+}
+```
+
+**How do I know a treasury withdrawal settled?**
+Check `Status` for `WithdrawalStatusCompleted`, or call `Succeeded()`.
+Statuses: `queue`, `refueling`, `refuel_confirmed`, `broadcasting` (EVM),
+`sending`, `in_mempool` (BTC family), `confirm_check`, `completed`, `failed`
+(see `ErrorReason`). A withdrawal stays in `confirm_check` until its
+transaction reaches `RequiredConfirmations`, then turns `completed`.
+`Confirmations` is `*int`, `nil` until the transaction is in a block;
+`RequiredConfirmations` is always present. Withdrawals send no webhooks.
+
+```go
+w, err := c.Withdrawals.Info(ctx, withdrawalUUID)
+if err != nil {
+    return err
+}
+switch {
+case w.Succeeded():
+    // settled: book it
+case w.Status == cryptochief.WithdrawalStatusConfirmCheck && w.Confirmations != nil:
+    log.Printf("withdrawal %s on chain: %d/%d confirmations",
+        w.UUID, *w.Confirmations, w.RequiredConfirmations)
+case w.IsTerminal():
+    log.Printf("withdrawal %s %s: %s", w.UUID, w.Status, w.ErrorReason)
+}
+```
 
 **Who pays for a sweep's gas?**
 `FeeMode` on the sweep settings — but only when the deposit wallet cannot pay

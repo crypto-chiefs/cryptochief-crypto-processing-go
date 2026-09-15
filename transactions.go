@@ -101,25 +101,46 @@ type ExecuteTransactionRequest struct {
 // TransactionInfo describes the persistent record of one signed/broadcast
 // transaction.
 type TransactionInfo struct {
-	UUID          string  `json:"uuid"`
-	Status        string  `json:"status"`
-	Network       Chain   `json:"network"`
-	ChainFamily   string  `json:"chain_family,omitempty"`
-	FromAddress   string  `json:"from_address"`
-	ToAddress     string  `json:"to_address,omitempty"`
-	Type          TxType  `json:"type,omitempty"`
-	Value         string  `json:"value,omitempty"`
-	Coin          string  `json:"coin,omitempty"`
-	Contract      string  `json:"contract,omitempty"`
-	TxHash        string  `json:"tx_hash,omitempty"`
-	SignedTxHex   string  `json:"signed_tx_hex,omitempty"`
-	ExpiresAt     string  `json:"expires_at,omitempty"`
-	Nonce         *uint64 `json:"nonce,omitempty"`
-	ActualFee     string  `json:"actual_fee,omitempty"`
-	ActualFeeFiat string  `json:"actual_fee_fiat,omitempty"`
-	CreatedAt     string  `json:"created_at,omitempty"`
-	UpdatedAt     string  `json:"updated_at,omitempty"`
-	Error         string  `json:"error,omitempty"`
+	UUID        string `json:"uuid"`
+	Status      string `json:"status"`
+	Network     Chain  `json:"network"`
+	ChainFamily string `json:"chain_family,omitempty"`
+	FromAddress string `json:"from_address"`
+	ToAddress   string `json:"to_address,omitempty"`
+	Type        TxType `json:"type,omitempty"`
+	Value       string `json:"value,omitempty"`
+	Contract    string `json:"contract,omitempty"`
+	TxHash      string `json:"tx_hash,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+
+	// Deprecated: never populated.
+	Coin string `json:"coin,omitempty"`
+	// Deprecated: never populated; the signed hex is in SignTransactionResponse.
+	SignedTxHex string `json:"signed_tx_hex,omitempty"`
+	// Deprecated: never populated.
+	Nonce *uint64 `json:"nonce,omitempty"`
+	// Deprecated: never populated.
+	ActualFee string `json:"actual_fee,omitempty"`
+	// Deprecated: never populated.
+	ActualFeeFiat string `json:"actual_fee_fiat,omitempty"`
+
+	// CompletedAt is set on final statuses: for confirmed, the moment
+	// RequiredConfirmations was reached.
+	CompletedAt string `json:"completed_at,omitempty"`
+	// ErrorReason is set on failed and expired.
+	ErrorReason string `json:"error_reason,omitempty"`
+
+	// Deprecated: never populated; use CompletedAt.
+	UpdatedAt string `json:"updated_at,omitempty"`
+	// Deprecated: never populated; use ErrorReason.
+	Error string `json:"error,omitempty"`
+
+	// Confirmations is 0 until the transaction is in a block, then rises while
+	// Status is broadcasted.
+	Confirmations int `json:"confirmations"`
+	// RequiredConfirmations is the count at which the transaction is confirmed.
+	RequiredConfirmations int `json:"required_confirmations"`
 }
 
 // IsTerminal reports whether the tx reached a final state.

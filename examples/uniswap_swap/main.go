@@ -31,7 +31,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 
 	from := mustEnv("FROM_ADDRESS")
@@ -45,7 +45,6 @@ func main() {
 	// Swap 0.01 of the source token. The amount needs to be in TOKEN_IN's
 	// base units — most ERC-20s are 18 decimals; USDT is 6. Adjust to your token.
 	amountIn, _ := cryptochief.HumanToBase("0.01", 18)
-	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 	path := []string{tokenIn, tokenOut}
 
 	// The slippage floor, in TOKEN_OUT base units. Zero accepts whatever the
@@ -86,10 +85,10 @@ func main() {
 			log.Fatalf("execute approve: %v", err)
 		}
 		// The allowance has to be on chain before the swap is broadcast, or the
-		// swap lands first and reverts.
+		// swap lands first and reverts. Confirmed comes at RequiredConfirmations.
 		approved, err := cryptochief.WaitForTransaction(ctx, c, approve.UUID, cryptochief.PollOptions{
 			Interval: 5 * time.Second,
-			Timeout:  8 * time.Minute,
+			Timeout:  15 * time.Minute,
 		})
 		if err != nil {
 			status := "unknown"
@@ -104,7 +103,9 @@ func main() {
 		fmt.Printf("approved: tx=%s\n", approved.TxHash)
 	}
 
-	// One-shot: encode and sign in a single call.
+	// One-shot: encode and sign in a single call. The deadline counts from here,
+	// after the approve wait.
+	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
 	signed, err := c.Transactions.SignEVMCall(ctx, &cryptochief.EVMCallRequest{
 		Network:     network,
 		FromAddress: from,
@@ -131,7 +132,7 @@ func main() {
 	}
 	final, err := cryptochief.WaitForTransaction(ctx, c, signed.UUID, cryptochief.PollOptions{
 		Interval: 5 * time.Second,
-		Timeout:  8 * time.Minute,
+		Timeout:  15 * time.Minute,
 	})
 	if err != nil {
 		// The helper returns a nil snapshot when no poll ever succeeded, so
@@ -142,8 +143,8 @@ func main() {
 		}
 		log.Fatalf("wait: last status=%s err=%v", status, err)
 	}
-	fmt.Printf("terminal: status=%s tx=%s fee=$%s\n",
-		final.Status, final.TxHash, final.ActualFeeFiat)
+	fmt.Printf("terminal: status=%s tx=%s confirmations=%d/%d\n",
+		final.Status, final.TxHash, final.Confirmations, final.RequiredConfirmations)
 }
 
 func mustEnv(name string) string {

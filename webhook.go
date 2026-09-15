@@ -133,7 +133,9 @@ func (w *webhookResponseWriter) Write(b []byte) (int, error) {
 // Only the terminal statuses fire a webhook: "payout.paid" and
 // "payout.system_fail". The nested fee_info / sources / service_operations
 // objects are left as raw JSON — decode them on demand if you need the
-// per-source breakdown.
+// per-source breakdown: Sources into []PayoutSource, ServiceOperations into
+// []PayoutServiceOperation. "payout.paid" is sent once every source reached
+// RequiredConfirmations.
 type PayoutWebhookEvent struct {
 	Event             string          `json:"event"` // "payout.paid" | "payout.system_fail"
 	UUID              string          `json:"uuid"`
@@ -149,6 +151,10 @@ type PayoutWebhookEvent struct {
 	CreatedAt         string          `json:"created_at,omitempty"`
 	CompletedAt       string          `json:"completed_at,omitempty"`
 	ErrorReason       string          `json:"error_reason,omitempty"` // set on payout.system_fail
+
+	// Confirmations and RequiredConfirmations: see PayoutInfo. Both optional.
+	Confirmations         *int `json:"confirmations,omitempty"`
+	RequiredConfirmations int  `json:"required_confirmations,omitempty"`
 }
 
 // TransactionWebhookEvent is the payload on transaction events. Only terminal
@@ -169,6 +175,10 @@ type TransactionWebhookEvent struct {
 	CreatedAt   string `json:"created_at,omitempty"`
 	CompletedAt string `json:"completed_at,omitempty"`
 	ErrorReason string `json:"error_reason,omitempty"` // set on transaction.failed
+
+	// Confirmations and RequiredConfirmations: see TransactionInfo.
+	Confirmations         int `json:"confirmations"`
+	RequiredConfirmations int `json:"required_confirmations"`
 }
 
 // PayInWebhookEvent is the payload on pay-in events. The event names carry
@@ -231,7 +241,7 @@ const SweepEventConfirmed = "sweep.confirmed"
 
 // SweepWebhookEvent is the payload on "sweep.confirmed": funds that arrived on
 // one of your deposit wallets have been swept to your master wallet AND the
-// sweep transaction is confirmed on chain.
+// sweep transaction reached RequiredConfirmations.
 //
 // WHAT THIS IS FOR. A "static_deposit.paid" event tells you a customer paid
 // you. This tells you the money has finished moving into your own custody.
@@ -267,12 +277,16 @@ type SweepWebhookEvent struct {
 	// Confirmations is what makes this event true rather than hopeful, and it
 	// travels with the event rather than being implied by it: "confirmed" is not
 	// the same number on every chain, so if you run your own finality policy you
-	// need the count to apply it. It is never zero.
+	// need the count to apply it. It is never zero, and at least
+	// RequiredConfirmations.
 	Confirmations int `json:"sweep_confirmations"`
 
-	// ConfirmedAt is when the chain was observed to hold the sweep. It is NOT
-	// the task's completion timestamp, which is stamped on every terminal
-	// outcome including failures and so says nothing about settlement.
+	// RequiredConfirmations is the count the sweep waited for. Optional: 0 when
+	// not sent.
+	RequiredConfirmations int `json:"required_confirmations,omitempty"`
+
+	// ConfirmedAt is when the sweep was observed at RequiredConfirmations. It is
+	// not Sweep.CompletedAt, which is the broadcast time.
 	ConfirmedAt string `json:"confirmed_at,omitempty"`
 
 	// TypeWork is what triggered the sweep: "momentum" (as soon as funds

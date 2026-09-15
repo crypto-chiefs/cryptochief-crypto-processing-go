@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/crypto-chiefs/cryptochief-crypto-processing-go"
@@ -25,7 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	req := &cryptochief.EstimatePayoutRequest{
@@ -63,20 +64,30 @@ func main() {
 	}
 	fmt.Printf("queued: uuid=%s order_id=%s\n", exec.UUID, exec.OrderID)
 
+	// Paid comes at RequiredConfirmations; Timeout must cover that depth.
 	final, err := cryptochief.WaitForPayout(ctx, c, exec.UUID, cryptochief.PollOptions{
 		Interval: 4 * time.Second,
-		Timeout:  4 * time.Minute,
+		Timeout:  15 * time.Minute,
 	})
 	if err != nil {
-		// The helper returns a nil snapshot when no poll ever succeeded, so
-		// there is not always a last status to report.
+		// A timeout is not a failed payout: do not resend. The helper returns a
+		// nil snapshot when no poll ever succeeded.
 		status := "unknown"
 		if final != nil {
 			status = final.Status
 		}
 		log.Fatalf("wait: last status=%s err=%v", status, err)
 	}
-	fmt.Printf("terminal: status=%s txid=%s\n", final.Status, final.TxID)
+	// Confirmations: lowest count among the sources, nil without a transaction.
+	confirmations := "none"
+	if final.Confirmations != nil {
+		confirmations = strconv.Itoa(*final.Confirmations)
+	}
+	fmt.Printf("terminal: status=%s confirmations=%s required=%d\n",
+		final.Status, confirmations, final.RequiredConfirmations)
+	for _, s := range final.Sources {
+		fmt.Printf("  source=%s txid=%s\n", s.Address, s.TxID)
+	}
 }
 
 func fee(f *cryptochief.PayoutFeeInfo) string {

@@ -24,7 +24,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	to := mustEnv("TO_ADDRESS")
@@ -62,15 +62,19 @@ func main() {
 		wg.Add(1)
 		go func(it cryptochief.BatchItemResult) {
 			defer wg.Done()
+			// Paid comes at RequiredConfirmations; Timeout must cover that depth.
 			final, err := cryptochief.WaitForPayout(ctx, c, it.UUID, cryptochief.PollOptions{
 				Interval: 4 * time.Second,
-				Timeout:  4 * time.Minute,
+				Timeout:  15 * time.Minute,
 			})
 			if err != nil {
 				fmt.Printf("  [%d] %s wait err: %v\n", it.Index, it.OrderID, err)
 				return
 			}
-			fmt.Printf("  [%d] %s → %s tx=%s\n", it.Index, it.OrderID, final.Status, final.TxID)
+			fmt.Printf("  [%d] %s → %s\n", it.Index, it.OrderID, final.Status)
+			for _, s := range final.Sources {
+				fmt.Printf("  [%d]   source=%s tx=%s\n", it.Index, s.Address, s.TxID)
+			}
 		}(it)
 	}
 	wg.Wait()

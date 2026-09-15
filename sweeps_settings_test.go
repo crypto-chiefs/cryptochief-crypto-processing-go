@@ -107,12 +107,12 @@ func TestSweepSettings_UpdateWireShape(t *testing.T) {
 }
 
 // A sweep is broadcast first and confirmed after. Both facts must survive
-// decoding, or a caller cannot tell a sent sweep from a settled one - which is
-// exactly what the old optimistic "completed" hid.
+// decoding. A broadcasted sweep already carries completed_at (the broadcast
+// time), so Status together with SweepConfirmations tells sent from settled.
 func TestSweep_ConfirmationFieldsDecode(t *testing.T) {
 	var path, body string
 	srv := captureServer(t, `{"items":[
-		{"task_id":"t1","status":"broadcasted","wallet_address":"0xa","chain":"ETH_MAINNET","sweep_confirmations":2,"type_work":"threshold","total_fee_usd":"1.20"},
+		{"task_id":"t1","status":"broadcasted","wallet_address":"0xa","chain":"ETH_MAINNET","sweep_confirmations":2,"completed_at":"2026-08-28T09:58:00Z","type_work":"threshold","total_fee_usd":"1.20"},
 		{"task_id":"t2","status":"completed","wallet_address":"0xb","chain":"ETH_MAINNET","sweep_confirmations":12,"completed_at":"2026-08-28T10:00:00Z","real_sweep_fee_usd":"0.98"}
 	],"meta":{"total":2,"page":1,"page_size":50}}`, &path, &body)
 
@@ -127,8 +127,8 @@ func TestSweep_ConfirmationFieldsDecode(t *testing.T) {
 	if out.Items[0].Status != SweepStatusBroadcasted || out.Items[0].SweepConfirmations != 2 {
 		t.Errorf("broadcast item = %+v", out.Items[0])
 	}
-	if out.Items[0].CompletedAt != "" {
-		t.Errorf("a sweep still in flight must not carry completed_at, got %q", out.Items[0].CompletedAt)
+	if out.Items[0].CompletedAt != "2026-08-28T09:58:00Z" {
+		t.Errorf("broadcast item completed_at = %q, want the broadcast time", out.Items[0].CompletedAt)
 	}
 	if out.Items[0].TypeWork != "threshold" || out.Items[0].TotalFeeUSD != "1.20" {
 		t.Errorf("type_work/total_fee_usd not decoded: %+v", out.Items[0])
