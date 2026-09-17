@@ -20,8 +20,7 @@ import (
 	"time"
 )
 
-// Copied without changes from
-// processing-webhook-service/internal/signature/testdata/webhook_hmac_v1_vectors.json.
+// Copied without changes from the shared webhook HMAC v1 reference vectors.
 const (
 	webhookVectorsFile   = "testdata/webhook_hmac_v1_vectors.json"
 	webhookVectorsSHA256 = "15a6e1423708e8c3b9ec4fac7ee6eb383db56703605647e02308a29166722502"

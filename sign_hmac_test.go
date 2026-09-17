@@ -16,8 +16,7 @@ import (
 	"testing"
 )
 
-// Copied without changes from
-// processing-api-gateway/internal/auth/testdata/hmac_v1_vectors.json.
+// Copied without changes from the shared HMAC v1 request-signing reference vectors.
 const (
 	requestVectorsFile   = "testdata/hmac_v1_vectors.json"
 	requestVectorsSHA256 = "a87df4921399dc14c7ceaa7e4c0dfa02495ad0400a5e722adfc0d3e3c1e064fe"
