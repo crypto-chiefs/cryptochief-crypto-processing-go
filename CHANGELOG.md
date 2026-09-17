@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-09-17
+
+### Added
+
+- HMAC-SHA256 v1 request signing: `X-CC-Timestamp`, `X-CC-Nonce`,
+  `X-CC-Signature` on every attempt; `SignHMACv1`, `StringToSignHMACv1`,
+  `HMACv1Input`, `ErrHMACv1LineBreak`; one clock correction on
+  `SIGNATURE_TIMESTAMP_OUT_OF_RANGE`.
+- `WithIdempotencyKey`, `IdempotencyKeyFromContext`, `ErrIdempotencyKey`: an
+  `Idempotency-Key` header on every call made with the returned context,
+  covered by the signature.
+- `CodeBadAuthHeaders`, `CodeSignatureTimestampOutOfRange`,
+  `CodeInvalidSignature`, `CodeSignatureReplayed`, `CodePayloadTooLarge`;
+  sentinels `ErrBadAuthHeaders`, `ErrSignatureTimestampOutOfRange`,
+  `ErrSignatureReplayed`, `ErrPayloadTooLarge`.
+- `APIError.Code` and `server_time` are read from the white-label installation
+  error format (`error.details.code`, `error.details.server_time`) as well as
+  from the gateway format.
+- HMAC-SHA256 v1 webhook verification: `VerifyWebhook`, `WebhookOption`,
+  `WithWebhookTolerance`, `WithWebhookClock`, `ErrWebhookHeaders`,
+  `ErrWebhookTimestamp`, `ErrWebhookSignature`, `SignWebhookV1`,
+  `WebhookV1StringToSign`, `HeaderWebhookDelivery`, `HeaderTimestamp`,
+  `HeaderSignature`.
+- `WebhookHandler` accepts `...WebhookOption`.
+- `Client.Request`: a signed request to any route under the configured base
+  URL, with the HTTP method as a parameter. Reaches the routes the
+  processing API does not have, such as the energy API's `GET /v1/balance`
+  and `GET /v1/orders/{key}`.
+- `ErrEmptyAPIKey`: an API key that is empty or made only of spaces and tabs
+  signs nothing. Returned by `New`, `SignHMACv1` and `SignWebhookV1`, and by
+  `VerifyWebhook` instead of a refusal sentinel.
+
+### Changed
+
+- **Breaking:** requests carry no `Signature` header. The body is the
+  `encoding/json` output of the request struct, member order as declared;
+  integers are sent exactly.
+- **Breaking:** webhooks are verified with HMAC-SHA256 v1 over the raw body
+  and the `X-Webhook-Delivery`, `X-CC-Timestamp`, `X-CC-Signature` headers.
+  `WebhookHandler` answers 401 on a verification failure and 500 when the API
+  key is empty.
+- The route path is signed percent-decoded, the form the server reads:
+  `/v1/orders/payout%2F8814` goes on the wire escaped and is signed as
+  `/v1/orders/payout/8814`. No route of the processing API carries an
+  escape, so no call changes.
+- The method is upper-cased over `a`–`z` only; every other byte goes into the
+  string to sign as it is.
+- A request with no body carries no `Content-Type`.
+
+### Removed
+
+- **Breaking:** `Sign`, `CanonicalJSON`, `VerifyWebhookSignature` (use
+  `VerifyWebhook`), `ErrInvalidSignature` (use `ErrWebhookSignature`),
+  `WebhookHeader`, `WebhookDeliveryHeader` (use `HeaderWebhookDelivery`).
+
 ## [0.9.0] - 2026-09-15
 
 ### Added

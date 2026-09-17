@@ -427,10 +427,6 @@ func TestTransactionWebhookEvent_Confirmations(t *testing.T) {
 // WebhookHandler, and returns the event the handler received.
 func deliverWebhook[T any](t *testing.T, apiKey, body string) T {
 	t.Helper()
-	canon, err := canonicalJSON(json.RawMessage(body))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var got T
 	called := false
 	h := WebhookHandler[T](apiKey, func(_ http.ResponseWriter, _ *http.Request, evt T) {
@@ -438,7 +434,7 @@ func deliverWebhook[T any](t *testing.T, apiKey, body string) T {
 		got = evt
 	})
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-	req.Header.Set(WebhookHeader, signBody(canon, apiKey))
+	req.Header = signWebhook(t, apiKey, time.Now().Unix(), "dlv-1", []byte(body))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK || !called {

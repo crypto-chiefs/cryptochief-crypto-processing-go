@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,6 +38,10 @@ type Client struct {
 	userAgent  string
 	logger     Logger
 	retry      retryConfig
+
+	// clockOffset is added to the local clock for X-CC-Timestamp, in seconds.
+	clockOffset atomic.Int64
+	now         func() time.Time
 
 	// tonRPCBaseURL is set by [WithTONRPCBaseURL]; empty = default host.
 	tonRPCBaseURL  string
@@ -180,13 +185,14 @@ func (c *Client) ton() *tonRPC {
 // Both merchantID and apiKey come from the Crypto Chief merchant dashboard
 // (Integration tab). The API key is the signing secret — keep it server-side.
 //
-// Returns an error if either credential is empty.
+// Returns an error if either credential is empty; an apiKey of only spaces
+// and tabs counts as empty and gives [ErrEmptyAPIKey].
 func New(merchantID, apiKey string, opts ...Option) (*Client, error) {
 	if merchantID == "" {
 		return nil, errors.New("cryptochief: merchant ID is required")
 	}
-	if apiKey == "" {
-		return nil, errors.New("cryptochief: API key is required")
+	if blankAPIKey(apiKey) {
+		return nil, ErrEmptyAPIKey
 	}
 
 	c := &Client{
@@ -195,6 +201,7 @@ func New(merchantID, apiKey string, opts ...Option) (*Client, error) {
 		baseURL:    DefaultBaseURL,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 		userAgent:  fmt.Sprintf("cryptochief-go/%s", Version),
+		now:        time.Now,
 		retry: retryConfig{
 			max:       3,
 			baseDelay: 200 * time.Millisecond,

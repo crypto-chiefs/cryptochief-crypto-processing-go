@@ -13,18 +13,14 @@ import (
 )
 
 // TestTransport_RequestShape verifies the wire form the transport sends:
-// POST with canonical JSON body, both auth headers populated, signature
+// POST with a JSON body, Merchant and HMAC v1 headers populated, signature
 // matches independent recomputation.
 func TestTransport_RequestShape(t *testing.T) {
 	const merchant = "merchant-xyz"
 	const apiKey = "test_api_key_123"
-	var gotPath, gotMerchant, gotSig string
-	var gotBody []byte
+	var sent sentRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotMerchant = r.Header.Get(headerMerchant)
-		gotSig = r.Header.Get(headerSignature)
-		gotBody, _ = io.ReadAll(r.Body)
+		sent = (&recorder{}).capture(r)
 		_, _ = io.WriteString(w, `{"uuid":"u1","status":"queue"}`)
 	}))
 	defer srv.Close()
@@ -46,22 +42,17 @@ func TestTransport_RequestShape(t *testing.T) {
 		t.Errorf("unexpected response: %+v", out)
 	}
 
-	if gotPath != "/v1/payout/execute" {
-		t.Errorf("path: %q", gotPath)
+	if sent.URLPath != "/v1/payout/execute" {
+		t.Errorf("path: %q", sent.URLPath)
 	}
-	if gotMerchant != merchant {
-		t.Errorf("merchant header: %q", gotMerchant)
+	if sent.Merchant != merchant {
+		t.Errorf("merchant header: %q", sent.Merchant)
 	}
-	wantSig := signBody(gotBody, apiKey)
-	if gotSig != wantSig {
-		t.Errorf("signature mismatch: got %s want %s", gotSig, wantSig)
+	if err := verifyHMACv1(sent, apiKey, "/v1/payout/execute"); err != nil {
+		t.Error(err)
 	}
-	// The transport should have sent the canonical (sorted) JSON form.
-	if !strings.Contains(string(gotBody), `"amount":"0.0001"`) {
-		t.Errorf("body missing fields: %s", gotBody)
-	}
-	if !strings.HasPrefix(string(gotBody), `{"amount":`) {
-		t.Errorf("body not canonical (sorted) — starts with %s", gotBody[:20])
+	if !strings.Contains(string(sent.Body), `"amount":"0.0001"`) {
+		t.Errorf("body missing fields: %s", sent.Body)
 	}
 }
 
@@ -304,8 +295,10 @@ func TestNew_ValidatesCredentials(t *testing.T) {
 	if _, err := New("", "k"); err == nil {
 		t.Error("empty merchant should fail")
 	}
-	if _, err := New("m", ""); err == nil {
-		t.Error("empty api key should fail")
+	for _, key := range []string{"", " ", "\t", " \t "} {
+		if _, err := New("m", key); !errors.Is(err, ErrEmptyAPIKey) {
+			t.Errorf("api key %q: %v, want ErrEmptyAPIKey", key, err)
+		}
 	}
 	c, err := New("m", "k")
 	if err != nil {

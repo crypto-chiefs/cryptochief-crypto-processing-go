@@ -353,11 +353,104 @@ If you skip the option, `Wallets.DecryptPrivateKey` returns
 `ErrRSAKeyNotConfigured` and the rest of the SDK continues to work —
 decryption is purely opt-in.
 
+## Request signing
+
+Every request is signed with HMAC-SHA256 v1.
+
+| Header | Value |
+|---|---|
+| `Merchant` | merchant ID |
+| `X-CC-Timestamp` | Unix time, seconds |
+| `X-CC-Nonce` | 32 hex from 16 random bytes |
+| `X-CC-Signature` | `v1=` + lowercase hex `HMAC-SHA256(API key, string to sign)` |
+
+The body is the `encoding/json` output of the request struct; the signature
+covers the SHA-256 of the bytes sent.
+
+String to sign, lines joined by `\n`, no trailing newline:
+
+```
+CC-HMAC-SHA256-REQ-V1
+<X-CC-Timestamp>
+<X-CC-Nonce>
+<METHOD>
+<route path, e.g. /v1/payout/execute>
+<query without "?", or empty>
+<Merchant>
+<Idempotency-Key, or empty>
+<lowercase hex SHA-256 of the body bytes>
+```
+
+The route path is signed percent-decoded — `/v1/orders/payout%2F8814`
+goes on the wire escaped and is signed as `/v1/orders/payout/8814`. The
+query is signed in the spelling the URL carries.
+
+`Idempotency-Key` is empty unless the call's context carries one — see
+[Idempotency](#idempotency).
+
+Timestamp, nonce and signature are computed on every attempt. On
+`SIGNATURE_TIMESTAMP_OUT_OF_RANGE` the client sets its clock offset from
+`server_time` and repeats the request once.
+
+An API key that is empty or made only of spaces and tabs is empty: `New`,
+`SignHMACv1` and `SignWebhookV1` return `ErrEmptyAPIKey`, and the server
+refuses a project configured with one.
+
+```go
+sig, err := cryptochief.SignHMACv1("API_KEY", cryptochief.HMACv1Input{
+    Timestamp: "1789430400",
+    Nonce:     "0123456789abcdef0123456789abcdef",
+    Method:    "POST",
+    Path:      "/v1/credits/balance",
+    Merchant:  "MERCHANT_ID",
+    Body:      []byte("{}"),
+})
+// X-CC-Signature: "v1=" + sig
+```
+
+## Calling a route the SDK has no method for
+
+`Client.Request` is the entry point every service method goes through: same
+signing, retries, clock correction and error envelope. It takes the HTTP
+method, so it reaches routes the processing API does not have — the energy
+API answers `GET /v1/orders/{key}` and `GET /v1/balance` with the same
+project credentials.
+
+```go
+c, _ := cryptochief.New("MERCHANT_ID", "API_KEY",
+    cryptochief.WithBaseURL("https://energy.crypto-chief.com"))
+
+var balance struct {
+    Credits string `json:"credits"`
+}
+err := c.Request(ctx, http.MethodGet, "/v1/balance", nil, &balance)
+```
+
+The method is signed and sent in upper case, over `a`–`z` only — an HTTP
+method is an RFC 9110 token. A query goes on the path as `?a=1&b=2`. `nil`
+sends no body, which is what a `GET` takes; any other value is encoded with
+`encoding/json` and the request carries `Content-Type: application/json`.
+
 ## Webhooks
 
-Outbound webhooks are signed with the same algorithm used for outgoing
-requests. The library ships both a primitive checker and a generic
-typed handler:
+Webhooks are signed with HMAC-SHA256 v1 over the raw body.
+
+| Header | Value |
+|---|---|
+| `X-Webhook-Delivery` | delivery id, 1–128 characters `[A-Za-z0-9_-]`; the same on every attempt and resend of one delivery |
+| `X-CC-Timestamp` | Unix time of the attempt, seconds |
+| `X-CC-Signature` | `v1=` + lowercase hex `HMAC-SHA256(API key, string to sign)` |
+
+String to sign, lines joined by `\n`, no trailing newline:
+
+```
+CC-HMAC-SHA256-WEBHOOK-V1
+<X-CC-Timestamp>
+<X-Webhook-Delivery>
+<lowercase hex SHA-256 of the raw body>
+```
+
+Typed handler:
 
 ```go
 mux.Handle("/webhook/payout", cryptochief.WebhookHandler[cryptochief.PayoutWebhookEvent](
@@ -368,27 +461,53 @@ mux.Handle("/webhook/payout", cryptochief.WebhookHandler[cryptochief.PayoutWebho
         // evt.Sources (raw JSON — decode it if you need them).
         // evt.Confirmations is the lowest count among the sources (optional).
         // payout.paid is sent once every source reached evt.RequiredConfirmations.
-        log.Printf("payout %s → %s (%s to %s)",
-            evt.UUID, evt.Status, evt.AmountToReceive, evt.ToAddress)
+        delivery := r.Header.Get(cryptochief.HeaderWebhookDelivery)
+        log.Printf("delivery %s: payout %s → %s (%s to %s)",
+            delivery, evt.UUID, evt.Status, evt.AmountToReceive, evt.ToAddress)
     },
 ))
 ```
 
-For a custom HTTP stack:
+`WebhookHandler` answers 401 when verification fails, 400 when the body is not
+JSON for the event type, 500 when the API key is empty.
+
+For a custom HTTP stack, pass the body bytes as received, before JSON
+decoding:
 
 ```go
-body, _ := io.ReadAll(r.Body)
-if err := cryptochief.VerifyWebhookSignature(apiKey, body, r.Header.Get("Signature")); err != nil {
+body, err := io.ReadAll(r.Body)
+if err != nil {
+    http.Error(w, "read body", http.StatusBadRequest)
+    return
+}
+if err := cryptochief.VerifyWebhook(apiKey, body, r.Header); err != nil {
     http.Error(w, "bad signature", http.StatusUnauthorized)
     return
 }
 ```
 
+| Error | Cause |
+|---|---|
+| `ErrWebhookHeaders` | a signature header is missing, repeated or malformed |
+| `ErrWebhookTimestamp` | `X-CC-Timestamp` differs from the current time by more than the tolerance |
+| `ErrWebhookSignature` | the signature does not match the body |
+
+Header names match ignoring ASCII case; spaces and tabs around values are
+ignored. `X-CC-Timestamp` is decimal digits with no leading zero — the value
+signed is the one the string to sign carries.
+The tolerance is 300 seconds; `WithWebhookTolerance(d)` and
+`WithWebhookClock(now)` change it and the time source, in `VerifyWebhook` and
+`WebhookHandler` alike. A resend arrives with the same `X-Webhook-Delivery` and
+a new timestamp: deduplicate by the delivery id.
+
+`SignWebhookV1(apiKey, timestamp, deliveryID, body)` returns the
+`X-CC-Signature` value and `WebhookV1StringToSign` the string to sign.
+
 `cryptochief.WebhookSenderIPs` lists the addresses webhooks are delivered
 from — whitelist them at your edge for defence in depth.
 
 Typed event payloads: `PayoutWebhookEvent`, `TransactionWebhookEvent`,
-`PayInWebhookEvent`, `StaticDepositWebhookEvent`.
+`PayInWebhookEvent`, `StaticDepositWebhookEvent`, `SweepWebhookEvent`.
 
 ## Error handling
 
@@ -412,6 +531,13 @@ if errors.As(err, &apiErr) {
 
 `errors.Is(err, cryptochief.ErrInsufficientFunds)` works too — the package
 exposes sentinel `*APIError` values for the same codes.
+
+`Code` is read from either error format:
+
+| Server | Body | Code |
+|---|---|---|
+| Gateway | `{"ok":false,"error":"CODE","msg":"..."}` | `error`; `msg` when `error` is `SERVICE_ERROR` |
+| White-label installation | `{"data":null,"error":{"status":401,"name":"...","message":"...","details":{"code":"CODE"}}}` | `error.details.code`, else `error.name` |
 
 ## Amounts
 
@@ -457,6 +583,22 @@ base URL — point a test-mode project's credentials at the same client.
 re-submitting the same `order_id` returns the same `uuid` rather than
 creating a second payout. The library's automatic retry on 5xx relies on
 this — your callers don't need any extra ceremony.
+
+`WithIdempotencyKey` puts an `Idempotency-Key` header on every call made with
+the returned context:
+
+```go
+ctx := cryptochief.WithIdempotencyKey(ctx, "payout-2026-09-16-0001")
+res, err := c.Payouts.Execute(ctx, req)
+```
+
+The header is part of the string to sign, so it has to be set before the client
+signs: one added by a custom `http.RoundTripper` is not covered by the
+signature and the server answers 401 `INVALID_SIGNATURE`. The server keeps the
+value in the billing record of the call, up to 255 bytes; payouts are
+deduplicated by `OrderID`, not by this header. The key must be printable ASCII
+with no space or tab at either edge, otherwise the call fails with
+`ErrIdempotencyKey`.
 
 ## Runnable examples
 
@@ -507,8 +649,8 @@ amount; the sender's Jetton wallet address and gas budget are resolved
 automatically.
 
 **How do I verify a Crypto Chief webhook signature?**
-`cryptochief.VerifyWebhookSignature(apiKey, body, sig)`, or wrap a typed handler
-with `cryptochief.WebhookHandler[...]`.
+`cryptochief.VerifyWebhook(apiKey, body, r.Header)` with the raw body, or wrap a
+typed handler with `cryptochief.WebhookHandler[...]`.
 
 **Which blockchains does the crypto processing API support?**
 Ethereum, BNB Smart Chain, Polygon, Tron, TON, Solana, Bitcoin, Litecoin,

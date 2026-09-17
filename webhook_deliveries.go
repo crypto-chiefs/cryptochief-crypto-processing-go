@@ -6,14 +6,14 @@ import "context"
 // deliveries the platform made TO your endpoint. Access via Client.Webhooks.
 //
 // A delivery is named by the uuid the platform put on it in the
-// X-Webhook-Delivery header ([WebhookDeliveryHeader]). It is the same across
+// X-Webhook-Delivery header ([HeaderWebhookDelivery]). It is the same across
 // every attempt and every resend of that delivery, which makes it the natural
 // idempotency key for your receiver, and it is the only handle there is: the
 // API has no listing of deliveries, and the payload names the order or deposit,
 // not the delivery. Keep it when you log an incoming webhook.
 //
 // The verification helpers for INCOMING webhooks are in webhook.go
-// ([VerifyWebhookSignature], [WebhookHandler]); this service is the other
+// ([VerifyWebhook], [WebhookHandler]); this service is the other
 // direction.
 type WebhooksService struct{ c *Client }
 

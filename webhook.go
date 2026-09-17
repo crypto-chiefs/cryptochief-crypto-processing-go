@@ -2,29 +2,55 @@ package cryptochief
 
 import (
 	"bytes"
-	"crypto/subtle"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 )
 
-// ErrInvalidSignature is returned when a webhook payload's Signature header
-// does not match the body. Treat as a hard authentication failure — never
-// process the event.
-var ErrInvalidSignature = errors.New("cryptochief: invalid webhook signature")
+// Signature headers of requests and webhooks.
+const (
+	// HeaderWebhookDelivery carries the delivery id of a webhook: 1–128
+	// characters [A-Za-z0-9_-]. It is the same on every attempt and resend of
+	// one delivery, so it serves as the receiver's idempotency key, and it is
+	// what [WebhooksService.Info] and [WebhooksService.Resend] take.
+	HeaderWebhookDelivery = "X-Webhook-Delivery"
+	// HeaderTimestamp carries the Unix time of the signature in seconds.
+	HeaderTimestamp = "X-CC-Timestamp"
+	// HeaderSignature carries "v1=" and 64 hex characters of HMAC-SHA256.
+	HeaderSignature = "X-CC-Signature"
+)
 
-// WebhookHeader is the case-insensitive name Crypto Chief uses for the
-// signature header on outgoing webhooks.
-const WebhookHeader = "Signature"
+const (
+	webhookV1Scope          = "CC-HMAC-SHA256-WEBHOOK-V1"
+	webhookSignaturePrefix  = "v1="
+	defaultWebhookTolerance = 300 * time.Second
+	webhookDeliveryIDMaxLen = 128
+)
 
-// WebhookDeliveryHeader carries the delivery's uuid on every webhook the
-// platform sends. It is constant across every attempt and resend of one
-// delivery - use it as the idempotency key of your receiver - and it is what
-// [WebhooksService.Info] and [WebhooksService.Resend] take. Keep it when you
-// log an incoming webhook: there is no other way to name a delivery later.
-const WebhookDeliveryHeader = "X-Webhook-Delivery"
+// Webhook verification refusals. [VerifyWebhook] returns exactly one of them
+// for a webhook it rejects; match with [errors.Is]. Answer the sender with
+// HTTP 401.
+var (
+	// ErrWebhookHeaders: X-CC-Timestamp, X-Webhook-Delivery or X-CC-Signature
+	// is missing, repeated or malformed.
+	ErrWebhookHeaders = errors.New("cryptochief: webhook signature headers are missing, repeated or malformed")
+	// ErrWebhookTimestamp: X-CC-Timestamp is outside the tolerance.
+	ErrWebhookTimestamp = errors.New("cryptochief: webhook timestamp is outside the tolerance")
+	// ErrWebhookSignature: X-CC-Signature does not match the body.
+	ErrWebhookSignature = errors.New("cryptochief: webhook signature does not match")
+)
+
+var (
+	errWebhookTimestamp  = errors.New("cryptochief: webhook timestamp must be positive")
+	errWebhookDeliveryID = errors.New("cryptochief: webhook delivery id must be 1-128 characters [A-Za-z0-9_-]")
+)
 
 // WebhookSenderIPs lists the IP addresses Crypto Chief delivers webhooks
 // from. Whitelist these in front of any handler that mutates state.
@@ -33,56 +59,260 @@ var WebhookSenderIPs = []string{
 	"104.248.248.64",
 }
 
-// VerifyWebhookSignature checks an incoming webhook against the merchant's
-// API key. The body MUST be the exact bytes Crypto Chief sent — DO NOT
-// re-encode it before passing it in.
+// WebhookV1StringToSign builds the string to sign of a webhook. Lines are
+// joined by "\n", with no trailing newline:
 //
-//	body, _ := io.ReadAll(r.Body)
-//	if err := cryptochief.VerifyWebhookSignature(apiKey, body, r.Header.Get("Signature")); err != nil {
+//	CC-HMAC-SHA256-WEBHOOK-V1
+//	<timestamp>
+//	<delivery id>
+//	<lowercase hex SHA-256 of body>
+//
+// timestamp must be positive; deliveryID must be 1–128 characters
+// [A-Za-z0-9_-].
+func WebhookV1StringToSign(timestamp int64, deliveryID string, body []byte) (string, error) {
+	if timestamp <= 0 {
+		return "", errWebhookTimestamp
+	}
+	if !validWebhookDeliveryID(deliveryID) {
+		return "", errWebhookDeliveryID
+	}
+	sum := sha256.Sum256(body)
+
+	var b strings.Builder
+	b.Grow(len(webhookV1Scope) + 20 + len(deliveryID) + 2*sha256.Size + 3)
+	b.WriteString(webhookV1Scope)
+	b.WriteByte('\n')
+	b.WriteString(strconv.FormatInt(timestamp, 10))
+	b.WriteByte('\n')
+	b.WriteString(deliveryID)
+	b.WriteByte('\n')
+	b.WriteString(hex.EncodeToString(sum[:]))
+	return b.String(), nil
+}
+
+// SignWebhookV1 returns the X-CC-Signature value of a webhook: "v1=" and
+// lowercase hex HMAC-SHA256(key = apiKey, message =
+// [WebhookV1StringToSign](timestamp, deliveryID, body)). body is the bytes
+// sent. An apiKey that is empty or only spaces and tabs returns
+// [ErrEmptyAPIKey].
+func SignWebhookV1(apiKey string, timestamp int64, deliveryID string, body []byte) (string, error) {
+	if blankAPIKey(apiKey) {
+		return "", ErrEmptyAPIKey
+	}
+	sts, err := WebhookV1StringToSign(timestamp, deliveryID, body)
+	if err != nil {
+		return "", err
+	}
+	return webhookSignaturePrefix + hex.EncodeToString(webhookMAC(apiKey, sts)), nil
+}
+
+// WebhookOption configures [VerifyWebhook] and [WebhookHandler].
+type WebhookOption func(*webhookConfig)
+
+type webhookConfig struct {
+	tolerance time.Duration
+	now       func() time.Time
+}
+
+// WithWebhookTolerance sets the allowed difference between X-CC-Timestamp and
+// the current time. d <= 0 means the default, 300 seconds.
+func WithWebhookTolerance(d time.Duration) WebhookOption {
+	return func(c *webhookConfig) { c.tolerance = d }
+}
+
+// WithWebhookClock sets the source of the current time. nil means time.Now.
+func WithWebhookClock(now func() time.Time) WebhookOption {
+	return func(c *webhookConfig) { c.now = now }
+}
+
+// VerifyWebhook checks an incoming webhook against the API key. body is the
+// raw request body, read before any JSON decoding; header is the request
+// headers.
+//
+//	body, err := io.ReadAll(r.Body)
+//	if err != nil { /* 400 */ }
+//	if err := cryptochief.VerifyWebhook(apiKey, body, r.Header); err != nil {
 //	    http.Error(w, "bad signature", http.StatusUnauthorized)
 //	    return
 //	}
 //
-// The signature is hex(md5(base64(canonicalJSON(body)) + apiKey)) — the
-// same algorithm used to sign outgoing requests. We re-canonicalise the
-// received bytes before verifying; the result is idempotent for any
-// already-canonical body.
-func VerifyWebhookSignature(apiKey string, body []byte, signatureHeader string) error {
-	if apiKey == "" {
-		return errors.New("cryptochief: API key is required for webhook verification")
+// Checks, in order:
+//
+//  1. X-CC-Timestamp, X-Webhook-Delivery and X-CC-Signature are each present
+//     once (names match ignoring ASCII case), with spaces and tabs trimmed at
+//     the edges and no CR or LF; the timestamp is decimal digits with no
+//     leading zero, the delivery id is 1–128 characters [A-Za-z0-9_-], the
+//     signature is "v1=" and 64 hex characters. Otherwise
+//     [ErrWebhookHeaders].
+//  2. |now − timestamp| <= tolerance (default 300 seconds). Otherwise
+//     [ErrWebhookTimestamp].
+//  3. The signature equals [SignWebhookV1] over body, compared in constant
+//     time, hex in any case. Otherwise [ErrWebhookSignature].
+//
+// An apiKey that is empty or only spaces and tabs refuses the webhook with
+// [ErrEmptyAPIKey], which matches none of the three.
+func VerifyWebhook(apiKey string, body []byte, header http.Header, opts ...WebhookOption) error {
+	if blankAPIKey(apiKey) {
+		return ErrEmptyAPIKey
 	}
-	if len(body) == 0 || signatureHeader == "" {
-		return ErrInvalidSignature
+	cfg := webhookConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.tolerance <= 0 {
+		cfg.tolerance = defaultWebhookTolerance
+	}
+	if cfg.now == nil {
+		cfg.now = time.Now
 	}
 
-	// Round-trip the body through canonicalJSON so any drift in key order
-	// is normalised before hashing. Unmarshal failure means the body
-	// isn't JSON at all → fail closed.
-	var tmp any
-	if err := json.Unmarshal(body, &tmp); err != nil {
-		return fmt.Errorf("cryptochief: webhook body is not JSON: %w", err)
+	tsValue, ok := singleWebhookHeader(header, HeaderTimestamp)
+	if !ok || !isCanonicalDecimal(tsValue) {
+		return ErrWebhookHeaders
 	}
-	canonical, err := json.Marshal(tmp)
+	timestamp, err := strconv.ParseInt(tsValue, 10, 64)
 	if err != nil {
-		return fmt.Errorf("cryptochief: canonicalise webhook body: %w", err)
+		return ErrWebhookHeaders
 	}
 
-	expected := signBody(canonical, apiKey)
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(signatureHeader)) != 1 {
-		return ErrInvalidSignature
+	deliveryID, ok := singleWebhookHeader(header, HeaderWebhookDelivery)
+	if !ok || !validWebhookDeliveryID(deliveryID) {
+		return ErrWebhookHeaders
+	}
+
+	sigValue, ok := singleWebhookHeader(header, HeaderSignature)
+	if !ok || !strings.HasPrefix(sigValue, webhookSignaturePrefix) {
+		return ErrWebhookHeaders
+	}
+	hexSig := sigValue[len(webhookSignaturePrefix):]
+	if len(hexSig) != 2*sha256.Size {
+		return ErrWebhookHeaders
+	}
+	got, err := hex.DecodeString(hexSig)
+	if err != nil {
+		return ErrWebhookHeaders
+	}
+
+	tol := int64(cfg.tolerance / time.Second)
+	now := cfg.now().Unix()
+	if timestamp < now-tol || timestamp > now+tol {
+		return ErrWebhookTimestamp
+	}
+
+	sts, err := WebhookV1StringToSign(timestamp, deliveryID, body)
+	if err != nil {
+		return ErrWebhookHeaders
+	}
+	if !hmac.Equal(webhookMAC(apiKey, sts), got) {
+		return ErrWebhookSignature
 	}
 	return nil
 }
 
-// WebhookHandler wraps a typed handler with signature verification and JSON
-// decoding. T is the expected event shape — pass one of the WebhookEvent*
-// types below or your own struct.
+func webhookMAC(apiKey, stringToSign string) []byte {
+	m := hmac.New(sha256.New, []byte(apiKey))
+	m.Write([]byte(stringToSign))
+	return m.Sum(nil)
+}
+
+// singleWebhookHeader returns the only value of the header name, with spaces
+// and tabs trimmed. Keys are matched to name ignoring ASCII case only, across
+// all spellings of the key. ok is false when the header is absent, repeated or
+// contains CR or LF.
+func singleWebhookHeader(header http.Header, name string) (string, bool) {
+	var values []string
+	for k, vs := range header {
+		if asciiEqualFold(k, name) {
+			values = append(values, vs...)
+		}
+	}
+	if len(values) != 1 {
+		return "", false
+	}
+	v := strings.Trim(values[0], " \t")
+	if strings.ContainsAny(v, "\r\n") {
+		return "", false
+	}
+	return v, true
+}
+
+// asciiEqualFold reports whether a and b are equal byte by byte, with A-Z
+// matching a-z. Unlike strings.EqualFold it does not fold non-ASCII
+// characters: U+017F does not match "s", U+212A does not match "k".
+func asciiEqualFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		ca, cb := a[i], b[i]
+		if 'A' <= ca && ca <= 'Z' {
+			ca += 'a' - 'A'
+		}
+		if 'A' <= cb && cb <= 'Z' {
+			cb += 'a' - 'A'
+		}
+		if ca != cb {
+			return false
+		}
+	}
+	return true
+}
+
+// isCanonicalDecimal reports whether s is a non-empty run of digits with no
+// leading zero ("0" itself passes). The string to sign carries the number, so
+// a header value that is not its canonical spelling would let one signature
+// stand for two different header bytes.
+func isCanonicalDecimal(s string) bool {
+	if s == "" {
+		return false
+	}
+	if len(s) > 1 && s[0] == '0' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validWebhookDeliveryID(s string) bool {
+	if len(s) == 0 || len(s) > webhookDeliveryIDMaxLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isWebhookRefusal reports whether err is one of the three verification
+// refusals.
+func isWebhookRefusal(err error) bool {
+	return errors.Is(err, ErrWebhookHeaders) ||
+		errors.Is(err, ErrWebhookTimestamp) ||
+		errors.Is(err, ErrWebhookSignature)
+}
+
+// WebhookHandler wraps a typed handler with [VerifyWebhook] and JSON
+// decoding. T is the expected event shape — pass one of the *WebhookEvent
+// types below or your own struct. opts are passed to [VerifyWebhook].
 //
 //	http.Handle("/cc/webhook", cryptochief.WebhookHandler[cryptochief.PayoutWebhookEvent](apiKey,
 //	    func(w http.ResponseWriter, r *http.Request, evt cryptochief.PayoutWebhookEvent) {
 //	        log.Printf("payout %s → %s", evt.UUID, evt.Status)
 //	    }))
-func WebhookHandler[T any](apiKey string, handler func(http.ResponseWriter, *http.Request, T)) http.Handler {
+//
+// Responses: 405 for a method other than POST; 400 when the body cannot be
+// read (limit 1 MiB) or decoded into T; 401 on a verification refusal; 500
+// when apiKey is empty or only spaces and tabs. The handler's own status is
+// kept; 200 when it writes nothing.
+func WebhookHandler[T any](apiKey string, handler func(http.ResponseWriter, *http.Request, T), opts ...WebhookOption) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -93,8 +323,12 @@ func WebhookHandler[T any](apiKey string, handler func(http.ResponseWriter, *htt
 			http.Error(w, "read body", http.StatusBadRequest)
 			return
 		}
-		if err := VerifyWebhookSignature(apiKey, body, r.Header.Get(WebhookHeader)); err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+		if err := VerifyWebhook(apiKey, body, r.Header, opts...); err != nil {
+			status := http.StatusUnauthorized
+			if !isWebhookRefusal(err) {
+				status = http.StatusInternalServerError
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 		var evt T
@@ -105,7 +339,6 @@ func WebhookHandler[T any](apiKey string, handler func(http.ResponseWriter, *htt
 		rw := &webhookResponseWriter{ResponseWriter: w}
 		handler(rw, r, evt)
 		if !rw.wrote {
-			// Default to 200 OK if the handler didn't write a response itself.
 			rw.WriteHeader(http.StatusOK)
 		}
 	})

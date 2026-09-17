@@ -21,14 +21,23 @@
 //
 // # Authentication
 //
-// Every request is authenticated with two headers:
+// Every request carries these headers:
 //
-//	Merchant:  <merchant ID>
-//	Signature: hex(md5(base64(canonicalJSON(body)) + API_KEY))
+//	Merchant:       <merchant ID>
+//	X-CC-Timestamp: <Unix seconds>
+//	X-CC-Nonce:     <32 hex, random>
+//	X-CC-Signature: v1=hex(hmac_sha256(API_KEY, string_to_sign))
 //
-// The canonical body uses Go's encoding/json with recursively-sorted keys
-// and HTML-escaped < > &. The client computes this for you — pass typed
-// request structs and you never see canonical bytes.
+// string_to_sign is described at [StringToSignHMACv1]; it covers the SHA-256
+// of the body bytes sent. The body is the encoding/json output of the request
+// struct. Timestamp, nonce and signature are computed on every attempt.
+// [WithIdempotencyKey] adds a signed Idempotency-Key header to the calls made
+// with the context it returns.
+//
+// [Client.Request] sends a signed request to a route the SDK has no method
+// for, on any Crypto Chief API that takes the same credentials. It takes the
+// HTTP method: the energy API answers GET /v1/balance and
+// GET /v1/orders/{key} with them.
 //
 // # Domain services
 //
@@ -108,8 +117,13 @@
 //
 // # Webhooks
 //
-// Outbound webhooks are signed with the same algorithm. Verify them with
-// [VerifyWebhookSignature], or wrap a typed handler with [WebhookHandler]:
+// Webhooks carry X-Webhook-Delivery, X-CC-Timestamp and X-CC-Signature:
+//
+//	X-CC-Signature: v1=hex(hmac_sha256(API_KEY, string_to_sign))
+//
+// string_to_sign is described at [WebhookV1StringToSign]. Verify the raw body
+// and headers with [VerifyWebhook], or wrap a typed handler with
+// [WebhookHandler]:
 //
 //	mux.Handle("/webhook/payout", cryptochief.WebhookHandler[cryptochief.PayoutWebhookEvent](
 //	    apiKey,
@@ -131,4 +145,4 @@
 package cryptochief
 
 // Version is the library version reported in the User-Agent header.
-const Version = "0.9.0"
+const Version = "0.10.0"

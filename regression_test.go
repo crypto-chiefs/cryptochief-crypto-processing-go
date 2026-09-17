@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureServer spins an httptest server that records the request path and
@@ -49,7 +51,7 @@ func TestPayIn_CryptoModeWireShape(t *testing.T) {
 	if !strings.Contains(body, `"mode":"crypto"`) {
 		t.Errorf("mode must be lowercase object value, body=%s", body)
 	}
-	if !strings.Contains(body, `"asset":{"coin":"USDT","network":"TRON_MAINNET"}`) {
+	if !jsonMemberEqual(t, body, "asset", `{"coin":"USDT","network":"TRON_MAINNET"}`) {
 		t.Errorf("asset must serialize as an object, body=%s", body)
 	}
 }
@@ -75,7 +77,7 @@ func TestPayIn_FiatAssetsPolicyWireShape(t *testing.T) {
 	if !strings.Contains(body, `"mode":"fiat"`) {
 		t.Errorf("mode must be lowercase, body=%s", body)
 	}
-	if !strings.Contains(body, `"assets":{"allow":[{"coin":"USDT","network":"ETH_MAINNET"}]}`) {
+	if !jsonMemberEqual(t, body, "assets", `{"allow":[{"coin":"USDT","network":"ETH_MAINNET"}]}`) {
 		t.Errorf("assets must serialize as an allow/exclude object, body=%s", body)
 	}
 }
@@ -101,7 +103,7 @@ func TestPayout_AutoConvertPolicyWireShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(body, `"auto_convert_policy":{"allow":[{"coin":"USDT","network":"ETH_MAINNET"}]}`) {
+	if !jsonMemberEqual(t, body, "auto_convert_policy", `{"allow":[{"coin":"USDT","network":"ETH_MAINNET"}]}`) {
 		t.Errorf("auto_convert_policy must serialize as an object, body=%s", body)
 	}
 }
@@ -176,18 +178,18 @@ func TestPayIn_HistoryPath(t *testing.T) {
 	}
 }
 
-// TestCredits_BalanceWireShape asserts Credits.Balance posts a signed empty
-// JSON object to /v1/credits/balance and maps every response field —
+// TestCredits_BalanceWireShape asserts Credits.Balance posts an HMAC v1 signed
+// empty JSON object to /v1/credits/balance and maps every response field —
 // including a negative usd_balance, which the endpoint returns for postpaid
 // projects in debt.
 func TestCredits_BalanceWireShape(t *testing.T) {
 	const apiKey = "k"
-	var path, body, sig string
+	var path, body string
+	var sent sentRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		b, _ := io.ReadAll(r.Body)
-		body = string(b)
-		sig = r.Header.Get(headerSignature)
+		sent = (&recorder{}).capture(r)
+		path = sent.URLPath
+		body = string(sent.Body)
 		_, _ = io.WriteString(w, `{"credits_balance":-15200000,"usd_balance":"-1.52","is_postpaid":true,"debt_limit_credits":500000000,"can_execute_gas_operations":false,"gas_ops_min_credits":3000000,"timestamp":"2026-08-18T12:00:00Z"}`)
 	}))
 	t.Cleanup(srv.Close)
@@ -203,8 +205,8 @@ func TestCredits_BalanceWireShape(t *testing.T) {
 	if body != "{}" {
 		t.Errorf("body must be an empty JSON object, got %q", body)
 	}
-	if want := signBody([]byte(body), apiKey); sig != want {
-		t.Errorf("signature mismatch: got %s want %s", sig, want)
+	if err := verifyHMACv1(sent, apiKey, "/v1/credits/balance"); err != nil {
+		t.Error(err)
 	}
 	if out.CreditsBalance != -15200000 {
 		t.Errorf("CreditsBalance: %d", out.CreditsBalance)
@@ -229,17 +231,17 @@ func TestCredits_BalanceWireShape(t *testing.T) {
 	}
 }
 
-// TestCredits_TopupWireShape asserts Credits.Topup posts the signed canonical
-// body to /v1/credits/topup (keys sorted, redirect urls included when set) and
+// TestCredits_TopupWireShape asserts Credits.Topup posts the HMAC v1 signed
+// body to /v1/credits/topup (redirect urls included when set) and
 // maps every response field, including the optional order_uuid / expired_at.
 func TestCredits_TopupWireShape(t *testing.T) {
 	const apiKey = "k"
-	var path, body, sig string
+	var path, body string
+	var sent sentRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		b, _ := io.ReadAll(r.Body)
-		body = string(b)
-		sig = r.Header.Get(headerSignature)
+		sent = (&recorder{}).capture(r)
+		path = sent.URLPath
+		body = string(sent.Body)
 		_, _ = io.WriteString(w, `{"invoice_id":901,"payment_link":"https://pay.example/i/901","amount":"250","currency":"USDT","status":"pending","order_uuid":"ord-1","expired_at":1766000000}`)
 	}))
 	t.Cleanup(srv.Close)
@@ -257,11 +259,11 @@ func TestCredits_TopupWireShape(t *testing.T) {
 	if path != "/v1/credits/topup" {
 		t.Errorf("path: %q", path)
 	}
-	if want := `{"amount":"250","currency":"USDT","url_error":"https://shop.example/fail","url_success":"https://shop.example/ok"}`; body != want {
+	if want := `{"amount":"250","currency":"USDT","url_error":"https://shop.example/fail","url_success":"https://shop.example/ok"}`; !reflect.DeepEqual(jsonValue(t, []byte(body)), jsonValue(t, []byte(want))) {
 		t.Errorf("body = %s, want %s", body, want)
 	}
-	if want := signBody([]byte(body), apiKey); sig != want {
-		t.Errorf("signature mismatch: got %s want %s", sig, want)
+	if err := verifyHMACv1(sent, apiKey, "/v1/credits/topup"); err != nil {
+		t.Error(err)
 	}
 	if out.InvoiceID != 901 {
 		t.Errorf("InvoiceID: %d", out.InvoiceID)
@@ -304,7 +306,7 @@ func TestCredits_TopupOmitsEmptyOptionalURLs(t *testing.T) {
 	if path != "/v1/credits/topup" {
 		t.Errorf("path: %q", path)
 	}
-	if want := `{"amount":"25.50","currency":"USDC"}`; body != want {
+	if want := `{"amount":"25.50","currency":"USDC"}`; !reflect.DeepEqual(jsonValue(t, []byte(body)), jsonValue(t, []byte(want))) {
 		t.Errorf("empty optional urls must be omitted, body = %s, want %s", body, want)
 	}
 	if out.InvoiceID != 902 {
@@ -337,17 +339,12 @@ func (c *countingRW) Write(b []byte) (int, error) { c.body = append(c.body, b...
 
 func TestWebhookHandler_StatusWrites(t *testing.T) {
 	const apiKey = "k"
-	canon, err := canonicalJSON(map[string]any{
-		"event": "payout.paid", "uuid": "abc", "order_id": "o1", "status": "paid",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sig := signBody(canon, apiKey)
+	body := []byte(`{"event":"payout.paid","uuid":"abc","order_id":"o1","status":"paid"}`)
+	header := signWebhook(t, apiKey, time.Now().Unix(), "dlv-1", body)
 
 	newReq := func() *http.Request {
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(canon))
-		req.Header.Set(WebhookHeader, sig)
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+		req.Header = header.Clone()
 		return req
 	}
 

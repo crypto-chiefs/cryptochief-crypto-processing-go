@@ -1,8 +1,9 @@
 // webhook_server is a copy-pasteable HTTP server for receiving Crypto
 // Chief callbacks. Every handler:
 //
-//   - verifies the Signature header (done by WebhookHandler),
-//   - logs the event with a clear "next action" hint for your backend,
+//   - verifies X-CC-Signature, X-CC-Timestamp and X-Webhook-Delivery over the
+//     raw body (done by WebhookHandler; a refusal is answered with 401),
+//   - logs the event and its delivery id with a "next action" hint,
 //   - leaves TODO stubs where your business logic plugs in.
 //
 // Routes (configure these in Dashboard → Project Settings → Webhooks):
@@ -50,6 +51,13 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
+// deliveryID is the X-Webhook-Delivery header: the same on every attempt and
+// resend of one delivery. Use it as the idempotency key of your receiver and
+// with c.Webhooks.Info / c.Webhooks.Resend.
+func deliveryID(r *http.Request) string {
+	return r.Header.Get(cryptochief.HeaderWebhookDelivery)
+}
+
 func printBanner(addr string) {
 	fmt.Println("──────────────────────────────────────────────────────────────")
 	fmt.Println(" Crypto Chief webhook server")
@@ -77,8 +85,8 @@ func printBanner(addr string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handlePayout(w http.ResponseWriter, r *http.Request, evt cryptochief.PayoutWebhookEvent) {
-	log.Printf("[payout] uuid=%s order=%s status=%s amount_requested=%s amount_to_receive=%s to=%s",
-		evt.UUID, evt.OrderID, evt.Status, evt.AmountRequested, evt.AmountToReceive, evt.ToAddress)
+	log.Printf("[payout] delivery=%s uuid=%s order=%s status=%s amount_requested=%s amount_to_receive=%s to=%s",
+		deliveryID(r), evt.UUID, evt.OrderID, evt.Status, evt.AmountRequested, evt.AmountToReceive, evt.ToAddress)
 	if evt.Confirmations != nil {
 		log.Printf("  confirmations=%d (lowest among sources)", *evt.Confirmations)
 	}
@@ -113,8 +121,8 @@ func handlePayout(w http.ResponseWriter, r *http.Request, evt cryptochief.Payout
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handlePayIn(w http.ResponseWriter, r *http.Request, evt cryptochief.PayInWebhookEvent) {
-	log.Printf("[payin] uuid=%s order=%s status=%s coin=%s amount_crypto=%s to=%s",
-		evt.UUID, evt.OrderID, evt.Status, evt.PaymentCoin, evt.AmountCrypto, evt.ToAddress)
+	log.Printf("[payin] delivery=%s uuid=%s order=%s status=%s coin=%s amount_crypto=%s to=%s",
+		deliveryID(r), evt.UUID, evt.OrderID, evt.Status, evt.PaymentCoin, evt.AmountCrypto, evt.ToAddress)
 
 	switch evt.Status {
 	case cryptochief.PayInStatusWaitingAssetSelect:
@@ -151,8 +159,8 @@ func handlePayIn(w http.ResponseWriter, r *http.Request, evt cryptochief.PayInWe
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handleTransaction(w http.ResponseWriter, r *http.Request, evt cryptochief.TransactionWebhookEvent) {
-	log.Printf("[transaction] uuid=%s status=%s network=%s tx=%s from=%s to=%s value=%s confirmations=%d/%d",
-		evt.UUID, evt.Status, evt.Network, evt.TxHash, evt.FromAddress, evt.ToAddress, evt.Value,
+	log.Printf("[transaction] delivery=%s uuid=%s status=%s network=%s tx=%s from=%s to=%s value=%s confirmations=%d/%d",
+		deliveryID(r), evt.UUID, evt.Status, evt.Network, evt.TxHash, evt.FromAddress, evt.ToAddress, evt.Value,
 		evt.Confirmations, evt.RequiredConfirmations)
 
 	switch evt.Status {
@@ -178,8 +186,8 @@ func handleTransaction(w http.ResponseWriter, r *http.Request, evt cryptochief.T
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handleStaticDeposit(w http.ResponseWriter, r *http.Request, evt cryptochief.StaticDepositWebhookEvent) {
-	log.Printf("[static-deposit] uuid=%s status=%s coin=%s amount=%s to=%s from=%s tx=%s",
-		evt.UUID, evt.Status, evt.Coin, evt.Amount, evt.ToAddress, evt.FromAddress, evt.TxHash)
+	log.Printf("[static-deposit] delivery=%s uuid=%s status=%s coin=%s amount=%s to=%s from=%s tx=%s",
+		deliveryID(r), evt.UUID, evt.Status, evt.Coin, evt.Amount, evt.ToAddress, evt.FromAddress, evt.TxHash)
 
 	switch evt.Status {
 	case cryptochief.StaticDepositInMempool:
@@ -222,8 +230,8 @@ func handleStaticDeposit(w http.ResponseWriter, r *http.Request, evt cryptochief
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handleSweep(w http.ResponseWriter, r *http.Request, evt cryptochief.SweepWebhookEvent) {
-	log.Printf("[sweep] task=%s %s %s from=%s → master=%s tx=%s confirmations=%d/%d trigger=%s fee_usd=%s",
-		evt.TaskID, evt.Amount, evt.AssetSymbol, evt.WalletAddress, evt.ToAddress,
+	log.Printf("[sweep] delivery=%s task=%s %s %s from=%s → master=%s tx=%s confirmations=%d/%d trigger=%s fee_usd=%s",
+		deliveryID(r), evt.TaskID, evt.Amount, evt.AssetSymbol, evt.WalletAddress, evt.ToAddress,
 		evt.SweepTxHash, evt.Confirmations, evt.RequiredConfirmations, evt.TypeWork, evt.TotalFeeUSD)
 
 	// The event only ever arrives confirmed, but if you run your own finality

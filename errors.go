@@ -7,7 +7,7 @@ import (
 
 // APIError is the typed form of a Crypto Chief error response.
 //
-// A refusal arrives in one of two shapes. The gateway's own refusals put the
+// A refusal arrives in one of three shapes. The gateway's own refusals put the
 // machine code in "error" and an English sentence in "msg":
 //
 //	{"error":"LABEL_TOO_LONG","msg":"label is longer than 255 characters","ok":false}
@@ -17,7 +17,12 @@ import (
 //
 //	{"error":"SERVICE_ERROR","msg":"wallet_not_found","ok":false}
 //
-// Both resolve onto Code, so Code is the stable string callers should switch
+// A white-label installation puts the code in error.details.code and the
+// sentence in error.message:
+//
+//	{"data":null,"error":{"status":401,"name":"UnauthorizedError","message":"...","details":{"code":"SIGNATURE_REPLAYED"}}}
+//
+// All resolve onto Code, so Code is the stable string callers should switch
 // on whichever shape the server used. Message keeps the human-readable text,
 // and Raw keeps the whole body.
 //
@@ -42,6 +47,9 @@ type APIError struct {
 	// Raw is the raw response body for cases where the server returned
 	// something the client could not classify.
 	Raw []byte
+
+	// serverTime is server_time of the response in Unix seconds, 0 if absent.
+	serverTime int64
 }
 
 func (e *APIError) Error() string {
@@ -126,6 +134,22 @@ const (
 	CodeDeliveryInFlight   = "DELIVERY_IN_FLIGHT"
 	CodeResendTooSoon      = "RESEND_TOO_SOON"
 	CodeNoDeliveries       = "NO_DELIVERIES"
+
+	// Request refusals of the HMAC-SHA256 v1 signature and the body limit.
+	//
+	//   - CodeBadAuthHeaders — Merchant or an X-CC-* header is missing,
+	//     repeated or malformed (HTTP 400).
+	//   - CodeSignatureTimestampOutOfRange — X-CC-Timestamp is more than 300
+	//     seconds from server time (HTTP 401, server_time in the body). The
+	//     client sets its clock offset and repeats the request once.
+	//   - CodeInvalidSignature — X-CC-Signature does not match (HTTP 401).
+	//   - CodeSignatureReplayed — X-CC-Nonce was already used (HTTP 401).
+	//   - CodePayloadTooLarge — the request body exceeds the limit (HTTP 413).
+	CodeBadAuthHeaders               = "BAD_AUTH_HEADERS"
+	CodeSignatureTimestampOutOfRange = "SIGNATURE_TIMESTAMP_OUT_OF_RANGE"
+	CodeInvalidSignature             = "INVALID_SIGNATURE"
+	CodeSignatureReplayed            = "SIGNATURE_REPLAYED"
+	CodePayloadTooLarge              = "PAYLOAD_TOO_LARGE"
 )
 
 // Sentinel error values — use with errors.Is. (Pointer identity does not
@@ -148,6 +172,11 @@ var (
 	ErrSignatureExpired      = &APIError{Code: CodeSignatureExpired}
 	ErrAlreadyExecuted       = &APIError{Code: CodeAlreadyExecuted}
 	ErrPreflightFailed       = &APIError{Code: CodePreflightFailed}
+
+	ErrBadAuthHeaders               = &APIError{Code: CodeBadAuthHeaders}
+	ErrSignatureTimestampOutOfRange = &APIError{Code: CodeSignatureTimestampOutOfRange}
+	ErrSignatureReplayed            = &APIError{Code: CodeSignatureReplayed}
+	ErrPayloadTooLarge              = &APIError{Code: CodePayloadTooLarge}
 )
 
 // IsRetryable reports whether an error is plausibly transient and worth
