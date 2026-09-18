@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-09-19
+
+### Added
+
+- `Transactions.Estimate` — `POST /v1/transaction/estimate`, a fee quote for a
+  would-be transaction WITHOUT signing or broadcasting anything and without
+  leaving a record: the `Sign` request minus the callback, for the "can this
+  wallet afford it" check. `EstimateTransactionResponse.Required` is the total
+  native coin the from-wallet must hold — fee + value for a native transfer,
+  fee alone for a token one. `EstimatedFeeFiat` / `RequiredFiat` are `""` when
+  the USD rate is unavailable — an annotation, not a failure. On TRON the
+  answer also carries a fee breakdown, empty on every other chain:
+  `FeeExpected` (the probable burn given the wallet's current
+  staked/delegated/rented energy pool — an expectation, not a guarantee; fund
+  `EstimatedFee`, which prices an empty pool), `FeeLimit` (the on-chain cap
+  written into the transaction; a native TRX transfer carries none), and the
+  gross components `Energy` / `EnergyFee` / `BandwidthFee` / `ActivationFee`,
+  which always sum to `EstimatedFee` (`ActivationFee` only on a native
+  transfer to an address the chain has not seen yet). `TxTypeContract` is
+  refused with `CodeContractEstimateUnsupported` — contract calls have no
+  fee-quote mode. An infrastructure failure of the estimate itself answers
+  502 `ESTIMATE_UNAVAILABLE`, which the client's default retry treats as
+  transient, like any 5xx.
+- `Client.Energy` — TRON energy rental, charged to the same credits balance
+  as every other paid call. `Quote` (free of charge) prices a rental and holds
+  the price until it expires, publishing what burning TRX directly would cost
+  (`BurnPrice*`) and the difference (`Saving*`) so the saving is checkable
+  rather than claimed. `Rent` buys at the quoted (`QuoteRef`) or a fresh price
+  and is SYNCHRONOUS: by the time it answers, the energy is delegated or the
+  refusal reason is known — there is nothing to poll. `Order` reads an order
+  by the idempotency key it was placed with. An Idempotency-Key is REQUIRED on
+  `Rent` — set it with `WithIdempotencyKey`; without one the method refuses
+  locally, because the key is what makes a retry after a timeout return the
+  same order instead of buying the energy twice (the API's own refusal is
+  `CodeIdempotencyKeyRequired`, HTTP 400).
+- `Client.Native` — native-coin purchase (TRX, ETH, BNB, SOL, TON, ...) out of
+  the platform's liquidity, delivered to any address and charged to the same
+  credits balance. The price is the coins at the coin's rate plus the
+  platform's transfer fee at the same rate — the transfer is part of what you
+  pay for, so the receiver gets exactly `Amount`. `Quote` (free of charge;
+  about 90 seconds, single-use), `Buy` (synchronous, Idempotency-Key required
+  as above), `Order`. An expired or already-used quote is refused with
+  `QUOTE_EXPIRED` / `QUOTE_ALREADY_USED` (409) and must be re-quoted.
+- `EnergyOrderStatus*` / `NativeOrderStatus*` constants (`delivered`,
+  `refused`, `unresolved`), `Settled` / `NeedsAttention` on both order types,
+  and `ErrorCode` — the machine form of a refusal's `Error` sentence, for
+  integrations that branch on a code. On a refused order the charge fields
+  (`PriceUSD` / `Credits` / `TotalUSD` / `TxHash` / ...) stay off the wire
+  rather than reading as "this was free".
+
+### Changed
+
+- A refused or unresolved energy/native order is a business outcome, not a
+  transport failure: the API answers 502 (or 402, when the credits balance did
+  not cover the order) / 409 with the ORDER ITSELF as the body, and `Rent` /
+  `Buy` now return it as a regular `(*EnergyOrder, nil)` /
+  `(*NativeOrder, nil)` — branch on `Status`, `Error` and `ErrorCode`. An
+  `err` from these methods means no order exists. A 502 means nothing was
+  bought or charged and is safe to retry — the client's default retry already
+  does, made safe by the idempotency key; a 409 `NEEDS_ATTENTION` must NOT be
+  retried, the order may already be bought supplier-side — resolve it with
+  `Order` or support.
+- `parseAPIError` reads `"error"` as a machine code only on a gateway envelope
+  (one marked by `"ok":false` or a `"msg"`). A bare order view also carries an
+  `"error"` string, but there it is the human reason and the code lives in
+  `"error_code"` — previously such a body would have surfaced the sentence as
+  `APIError.Code`. A body that is neither shape (a proxy error page, ...)
+  falls back to `HTTP_<status>` with the body in `Raw`. This shape reaches an
+  `APIError` only through `Client.Request`; `Rent` / `Buy` decode the order
+  before it becomes an error.
+
+### Fixed
+
+- `.gitattributes` pins LF checkouts everywhere (`* text=auto eol=lf`): the
+  signature test vectors are pinned by sha256, and a CRLF checkout on Windows
+  changed their bytes, failing the vector tests on exactly the machines that
+  needed them most. `*.bat` keeps CRLF.
+
 ## [0.10.0] — 2026-09-17
 
 ### Added

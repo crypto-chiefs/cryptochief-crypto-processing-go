@@ -54,6 +54,65 @@ type SolanaAccount struct {
 	IsWritable bool   `json:"is_writable"`
 }
 
+// EstimateTransactionRequest is the body of POST /v1/transaction/estimate —
+// the Sign request without the callback: nothing is signed or broadcast, so
+// no webhooks can follow. TxTypeContract is refused by the API with
+// CONTRACT_ESTIMATE_UNSUPPORTED — contract calls have no fee-quote mode.
+type EstimateTransactionRequest struct {
+	Network     Chain  `json:"network"`
+	FromAddress string `json:"from_address"`
+	Type        TxType `json:"type"`
+
+	// Transfer-mode fields (TxTypeNative / TxTypeToken).
+	ToAddress string `json:"to_address,omitempty"`
+	Value     string `json:"value,omitempty"`    // BASE units, e.g. wei
+	Contract  string `json:"contract,omitempty"` // token contract for TxTypeToken
+}
+
+// EstimateTransactionResponse is what /transaction/estimate returns: a fee
+// quote for a transaction that is neither signed nor broadcast and leaves no
+// record.
+type EstimateTransactionResponse struct {
+	Network     Chain  `json:"network"`
+	ChainFamily string `json:"chain_family"`
+	Type        TxType `json:"type"`
+	FromAddress string `json:"from_address"`
+	ToAddress   string `json:"to_address"`
+
+	// EstimatedFee is the network fee in the chain's native coin, human units.
+	EstimatedFee string `json:"estimated_fee"`
+	// EstimatedFeeFiat is the same in USD — "" when the rate is unavailable.
+	EstimatedFeeFiat string `json:"estimated_fee_fiat"`
+	// Required is the total native coin the from-wallet must hold for the
+	// transfer to go through: fee + value for a native transfer, fee alone for
+	// a token one (the token amount itself is not native coin).
+	Required string `json:"required"`
+	// RequiredFiat is Required in USD — "" when the rate is unavailable.
+	RequiredFiat string `json:"required_fiat"`
+
+	// TRON-only fee breakdown, human TRX (Energy in energy units). The API
+	// omits these entirely on other chains, so they decode as "" / 0 there.
+	//
+	// FeeExpected is the expected burn given the wallet's current energy pool
+	// (staked / delegated / rented energy netted off). It is NOT a funding
+	// guarantee — the pool can expire or be consumed by another transfer
+	// before this transaction broadcasts. Fund EstimatedFee / Required, which
+	// price the transfer as if the pool were empty. FeeLimit is the on-chain
+	// cap written into the transaction's fee_limit field; a native TRX
+	// transfer carries no fee_limit at all, so it stays "" there. The *_fee
+	// components are the gross burn with an empty pool and always sum to
+	// EstimatedFee: energy_fee + bandwidth_fee + activation_fee. ActivationFee
+	// appears only on a native transfer to an address the chain has not seen
+	// yet; a zero component (e.g. EnergyFee when rented energy covers the
+	// whole call) stays off the wire.
+	FeeExpected   string `json:"fee_expected,omitempty"`
+	FeeLimit      string `json:"fee_limit,omitempty"`
+	Energy        int64  `json:"energy,omitempty"`
+	EnergyFee     string `json:"energy_fee,omitempty"`
+	BandwidthFee  string `json:"bandwidth_fee,omitempty"`
+	ActivationFee string `json:"activation_fee,omitempty"`
+}
+
 // SignTransactionRequest is the body of POST /v1/transaction/signature.
 //
 // Mode is the explicit discriminator: supplying fields foreign to the
@@ -159,6 +218,21 @@ func (t TransactionInfo) Succeeded() bool { return t.Status == TxStatusConfirmed
 type TransactionHistoryResponse struct {
 	Items []TransactionInfo `json:"items"`
 	Meta  HistoryMeta       `json:"meta"`
+}
+
+// Estimate quotes the network fee for a would-be transaction WITHOUT signing
+// or broadcasting anything and without leaving a record — a dry run of Sign
+// for the "can this wallet afford it" question. Required tells how much of the
+// chain's native coin the from-wallet must hold: fee + value for a native
+// transfer, fee alone for a token one. Both fiat fields are "" when the rate
+// is unavailable — an annotation, not a failure. TxTypeContract is refused
+// with CONTRACT_ESTIMATE_UNSUPPORTED.
+func (s *TransactionsService) Estimate(ctx context.Context, in *EstimateTransactionRequest) (*EstimateTransactionResponse, error) {
+	var out EstimateTransactionResponse
+	if err := s.c.do(ctx, "/v1/transaction/estimate", in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // Sign builds and signs a transaction WITHOUT broadcasting. Returns the uuid

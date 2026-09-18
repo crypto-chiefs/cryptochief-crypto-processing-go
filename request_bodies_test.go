@@ -294,6 +294,55 @@ func TestRequestBodies_V090(t *testing.T) {
 			func() error { return discard(c.Transactions.Execute(ctx, &ExecuteTransactionRequest{UUID: uuid})) },
 		},
 		{
+			"Energy.Quote/required", "/v1/energy/quote", `{"receive_address":"TNPee8f4rZQ7eHWvRzYFqhJmZ8zK5cEkLm"}`,
+			func() error {
+				return discard(c.Energy.Quote(ctx, &EnergyQuoteRequest{ReceiveAddress: "TNPee8f4rZQ7eHWvRzYFqhJmZ8zK5cEkLm"}))
+			},
+		},
+		{
+			"Energy.Quote/all", "/v1/energy/quote", `{"duration_sec":3600,"energy":64285,"receive_address":"TNPee8f4rZQ7eHWvRzYFqhJmZ8zK5cEkLm"}`,
+			func() error {
+				return discard(c.Energy.Quote(ctx, &EnergyQuoteRequest{ReceiveAddress: "TNPee8f4rZQ7eHWvRzYFqhJmZ8zK5cEkLm", Energy: 64285, DurationSec: 3600}))
+			},
+		},
+		{
+			"Energy.Rent/quote ref", "/v1/energy/rent", `{"quote_ref":"q_01JZZ3","receive_address":"TNPee8f4rZQ7eHWvRzYFqhJmZ8zK5cEkLm"}`,
+			func() error {
+				return discard(c.Energy.Rent(WithIdempotencyKey(ctx, "energy-0001"),
+					&EnergyRentRequest{ReceiveAddress: "TNPee8f4rZQ7eHWvRzYFqhJmZ8zK5cEkLm", QuoteRef: "q_01JZZ3"}))
+			},
+		},
+		{
+			"Energy.Order", "/v1/energy/order", `{"key":"energy-0001"}`,
+			func() error { return discard(c.Energy.Order(ctx, "energy-0001")) },
+		},
+		{
+			"Native.Quote", "/v1/native/quote",
+			`{"amount":"0.05","network":"ETH_MAINNET","receive_address":"0x000000000000000000000000000000000000dEaD"}`,
+			func() error {
+				return discard(c.Native.Quote(ctx, &NativeQuoteRequest{Network: ChainEthMainnet, ReceiveAddress: addr, Amount: "0.05"}))
+			},
+		},
+		{
+			"Native.Buy/direct", "/v1/native/buy",
+			`{"amount":"0.05","network":"ETH_MAINNET","receive_address":"0x000000000000000000000000000000000000dEaD"}`,
+			func() error {
+				return discard(c.Native.Buy(WithIdempotencyKey(ctx, "native-0001"),
+					&NativeBuyRequest{Network: ChainEthMainnet, ReceiveAddress: addr, Amount: "0.05"}))
+			},
+		},
+		{
+			"Native.Buy/quote ref", "/v1/native/buy", `{"quote_ref":"nq_01JZZ3"}`,
+			func() error {
+				return discard(c.Native.Buy(WithIdempotencyKey(ctx, "native-0001"),
+					&NativeBuyRequest{QuoteRef: "nq_01JZZ3"}))
+			},
+		},
+		{
+			"Native.Order", "/v1/native/order", `{"key":"native-0001"}`,
+			func() error { return discard(c.Native.Order(ctx, "native-0001")) },
+		},
+		{
 			"Transactions.SignTONCall/no bounce", "/v1/transaction/signature",
 			`{"calls":[{"data":"te4=","to":"EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs","value":"0"}],"from_address":"EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs","network":"TON_MAINNET","type":"contract"}`,
 			func() error {

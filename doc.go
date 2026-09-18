@@ -62,6 +62,9 @@
 //     crypto tickers there are rates for (rate availability, not the asset
 //     catalogue — that is c.Blockchain)
 //   - c.Credits        — billing credits balance + gas-ops gate (free endpoint)
+//   - c.Energy         — TRON energy rental: quote, rent, order status
+//   - c.Native         — native-coin purchase out of the platform's liquidity:
+//     quote, buy, order status
 //
 // # Contract calls without hand-encoded calldata
 //
@@ -145,4 +148,4 @@
 package cryptochief
 
 // Version is the library version reported in the User-Agent header.
-const Version = "0.10.0"
+const Version = "0.11.0"

@@ -286,7 +286,9 @@ func trimOWS(s string) string {
 // "error" is a string in the gateway format and an object in the
 // installation format.
 type errorEnvelope struct {
+	Ok         *bool           `json:"ok"`
 	Error      json.RawMessage `json:"error"`
+	ErrorCode  string          `json:"error_code"`
 	Msg        string          `json:"msg"`
 	ServerTime json.RawMessage `json:"server_time"`
 }
@@ -312,6 +314,17 @@ type installationErrorDetails struct {
 //
 //	{"ok":false,"error":"LABEL_TOO_LONG","msg":"label is longer than 255 characters"}
 //	{"ok":false,"error":"SERVICE_ERROR","msg":"wallet_not_found"}
+//
+// "error" is read as a code only on that envelope — marked by "ok":false or
+// a "msg". A bare order view (a refused/unresolved energy or native order
+// answering a non-2xx) also carries an "error" string, but there it is the
+// human reason, not a code; such a body carries the machine code in
+// "error_code" instead:
+//
+//	{"id":90211,"status":"refused","error_code":"INSUFFICIENT_LIQUIDITY","error":"we cannot fund that sale right now",...}
+//
+// Without either marker the code falls back to HTTP_<status> and the reason
+// stays in Raw.
 //
 // Installation format. The code is in error.details.code, the sentence in
 // error.message:
@@ -346,17 +359,29 @@ func parseAPIError(status int, body []byte) *APIError {
 	} else {
 		var errField string
 		_ = json.Unmarshal(raw, &errField)
-		code = errField
-		if code == "" || code == CodeServiceError {
-			code = env.Msg
-		}
-		if code == "" {
+		gatewayEnvelope := (env.Ok != nil && !*env.Ok) || env.Msg != ""
+		switch {
+		case gatewayEnvelope:
 			code = errField
-		}
-		message = env.Msg
-		if message == "" {
+			if code == "" || code == CodeServiceError {
+				code = env.Msg
+			}
+			if code == "" {
+				code = errField
+			}
+			message = env.Msg
+			if message == "" {
+				message = errField
+			}
+		case env.ErrorCode != "":
+			// An order view on a non-2xx: "error" is the human reason, the
+			// machine code is "error_code".
+			code = env.ErrorCode
 			message = errField
 		}
+		// Otherwise the body is no error envelope (a bare order view without
+		// error_code, a proxy error page, ...): the HTTP_<status> fallback
+		// below applies and the reason stays in Raw.
 	}
 	if code == "" {
 		code = fmt.Sprintf("HTTP_%d", status)
@@ -368,6 +393,30 @@ func parseAPIError(status int, body []byte) *APIError {
 		Raw:        body,
 		serverTime: serverTime,
 	}
+}
+
+// orderViewProbe detects an order view answering a non-2xx: a refused (502,
+// or 402 when the credits balance did not cover the order) or unresolved
+// (409) energy/native order IS the response body — a business outcome, not a
+// transport failure. An error envelope ({"ok":false,...}) carries no id and
+// no status, so it fails the probe and throws as usual.
+type orderViewProbe struct {
+	ID     int64  `json:"id"`
+	Status string `json:"status"`
+}
+
+// orderViewFromError returns the raw order view carried by err, if err is an
+// APIError whose body is one.
+func orderViewFromError(err error) (json.RawMessage, bool) {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || len(apiErr.Raw) == 0 {
+		return nil, false
+	}
+	var probe orderViewProbe
+	if err := json.Unmarshal(apiErr.Raw, &probe); err != nil || probe.ID == 0 || probe.Status == "" {
+		return nil, false
+	}
+	return apiErr.Raw, true
 }
 
 // unixSeconds reads a positive Unix time in seconds from a JSON number; 0 if

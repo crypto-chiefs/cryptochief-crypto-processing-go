@@ -131,6 +131,25 @@ func TestParseAPIError_BothEnvelopeShapes(t *testing.T) {
 			wantMessage: "UNKNOWN_FIELD",
 		},
 		{
+			// A refused order view answering a non-2xx: "error" is the human
+			// reason, the machine code is "error_code".
+			name:        "order view carries its code in error_code",
+			status:      http.StatusBadGateway,
+			body:        `{"id":90211,"status":"refused","error_code":"INSUFFICIENT_LIQUIDITY","error":"we cannot fund that sale from our own wallet right now"}`,
+			wantCode:    "INSUFFICIENT_LIQUIDITY",
+			wantMessage: "we cannot fund that sale from our own wallet right now",
+		},
+		{
+			// A bare order view without error_code: "error" is a sentence,
+			// not a code — without an envelope marker the status is the code
+			// and the reason stays in Raw.
+			name:        "bare order view falls back to the status",
+			status:      http.StatusBadGateway,
+			body:        `{"id":481517,"status":"refused","error":"supplier rejected the order"}`,
+			wantCode:    "HTTP_502",
+			wantMessage: "",
+		},
+		{
 			name:        "unparseable body falls back to the status",
 			status:      http.StatusInternalServerError,
 			body:        `<html>502 Bad Gateway</html>`,

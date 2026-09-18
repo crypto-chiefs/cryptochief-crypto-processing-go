@@ -78,7 +78,7 @@ is the **signing secret** — keep it server-side.
 |---|---|---|
 | Single payout (incl. auto-convert swap) | `c.Payouts` | `Estimate`, `Execute`, `Info`, `History` |
 | Mass payout (up to 50 items) | `c.Payouts` | `BatchEstimate`, `BatchExecute` |
-| Two-phase sign / broadcast for arbitrary txs | `c.Transactions` | `Sign`, `Execute`, `Info`, `History` |
+| Two-phase sign / broadcast for arbitrary txs | `c.Transactions` | `Estimate`, `Sign`, `Execute`, `Info`, `History` |
 | EVM / TRON contract calls (incl. ERC-20 / TRC-20) | `c.Transactions` | `SignEVMCall`, `SignTronCall`, `ERC20Transfer` |
 | Solana programs | `c.Transactions` | `SignAnchorCall`, `SignSolanaCall` |
 | TON contract calls (Jetton / NFT / text) | `c.Transactions` | `JettonTransfer`, `NFTTransfer`, `SendTONComment`, `SignTONCall` |
@@ -90,6 +90,8 @@ is the **signing secret** — keep it server-side.
 | On-chain queries | `c.Blockchain` | `SupportedChains`, `ContractsList`, `ContractsAvailable`, `WalletBalance`, `TransactionStatus` |
 | Fiat ↔ crypto rate quote | `c.Currencies` | `FiatToCrypto`, `CryptoToFiat`, `Fiats`, `Cryptos` |
 | Billing credits (free endpoints) | `c.Credits` | `Balance`, `Topup` |
+| TRON energy rental | `c.Energy` | `Quote`, `Rent`, `Order` |
+| Native-coin purchase (TRX/ETH/BNB/…) | `c.Native` | `Quote`, `Buy`, `Order` |
 
 ## End-to-end example: payout with confirmation
 
@@ -149,6 +151,147 @@ _, err = c.Transactions.Execute(ctx, &cryptochief.ExecuteTransactionRequest{
     UUID: signed.UUID,
 })
 ```
+
+### Estimate the fee before signing
+
+`Transactions.Estimate` quotes the network fee for a would-be transaction
+**without signing or broadcasting** anything — the same request as `Sign`,
+minus the callback. Use it for the "can this wallet afford it" check:
+
+```go
+est, err := c.Transactions.Estimate(ctx, &cryptochief.EstimateTransactionRequest{
+    Network:     cryptochief.ChainEthSepolia,
+    FromAddress: "0xYourWallet...",
+    Type:        cryptochief.TxTypeNative, // or TxTypeToken (+ Contract)
+    ToAddress:   "0xRecipient...",
+    Value:       wei.String(), // base units (wei)
+})
+if err != nil {
+    var apiErr *cryptochief.APIError
+    if errors.As(err, &apiErr) && apiErr.Code == cryptochief.CodeContractEstimateUnsupported {
+        // TxTypeContract has no fee-quote mode
+    }
+    return err
+}
+fmt.Println("fee:", est.EstimatedFee, est.EstimatedFeeFiat)         // native coin, USD
+fmt.Println("wallet must hold:", est.Required, est.RequiredFiat)    // native: fee+value; token: fee
+```
+
+`Required` is the total native coin the from-wallet must hold: fee + value
+for a native transfer, fee alone for a token one. `EstimatedFeeFiat` and
+`RequiredFiat` are `""` when the USD rate is unavailable — an annotation,
+not a failure.
+
+On TRON the estimate also carries a fee breakdown, empty on every other
+chain: `FeeExpected` (the probable burn given the wallet's current
+staked/delegated/rented energy pool — an expectation, not a guarantee; fund
+`EstimatedFee`, which prices an empty pool), `FeeLimit` (the on-chain cap
+written into the transaction), and the gross components `Energy` /
+`EnergyFee` / `BandwidthFee` / `ActivationFee`, which always sum to
+`EstimatedFee`. `ActivationFee` appears only on a native transfer to an
+address the chain has not seen yet.
+
+## Renting TRON energy
+
+A TRC-20 transfer burns ~13–27 TRX when the sender has no energy; renting
+the energy costs a fraction of that. `c.Energy` buys it against the same
+credits balance as every other paid call:
+
+```go
+// Free: what would this cost, and what would burning TRX cost instead?
+quote, err := c.Energy.Quote(ctx, &cryptochief.EnergyQuoteRequest{
+    ReceiveAddress: "TSenderWallet…", // the transfer's sender — the energy goes there
+})
+if err != nil {
+    return err
+}
+fmt.Println("rent:", quote.PriceTRX, "TRX · burn:", quote.BurnPriceTRX, "TRX · save:", quote.SavingTRX, "TRX")
+
+// Buy at the quoted price. Idempotency-Key is REQUIRED — it makes a retry
+// after a timeout return the same order instead of buying twice.
+ctx = cryptochief.WithIdempotencyKey(ctx, "energy-2026-09-18-0001")
+order, err := c.Energy.Rent(ctx, &cryptochief.EnergyRentRequest{QuoteRef: quote.Ref})
+if err != nil {
+    return err // a real failure — no order exists
+}
+// Rent is synchronous: by now the energy is delegated or the refusal is known.
+// A refused/unresolved order comes back as a regular order, not an error:
+switch order.Status {
+case cryptochief.EnergyOrderStatusRefused:
+    // 502/402 — nothing was bought or charged; order.Error / order.ErrorCode say why
+case cryptochief.EnergyOrderStatusUnresolved:
+    // 409, order.NeedsAttention — may already be bought; DO NOT retry,
+    // resolve with c.Energy.Order(ctx, "energy-2026-09-18-0001") or support
+}
+fmt.Println(order.Status, order.DeliveredEnergy, "energy for", order.Credits, "credits")
+
+// Later, by the same key:
+order, err = c.Energy.Order(ctx, "energy-2026-09-18-0001")
+```
+
+Statuses: `delivered` (energy delegated), `refused` (nothing bought or
+charged — `PriceUSD` / `Credits` stay empty rather than reading as "free",
+and `Error` / `ErrorCode` say why), `unresolved` (the supplier's answer never
+arrived). A 502 from `Rent` means nothing was bought and is safe to retry —
+the client's default retry already does, made safe by the idempotency key; a
+402 is the same refusal with an empty credits balance (top up first). A 409
+`NEEDS_ATTENTION` must not be retried. All three arrive as a returned order —
+an `err` from `Rent` means no order exists.
+
+## Buying native coins
+
+`c.Native` sells the native coin of a network (TRX, ETH, BNB, SOL, TON, …)
+out of the platform's liquidity, delivered to any address and charged to the
+same credits balance as every other paid call. The price is the coins at the
+coin's market rate plus the platform's transfer fee at the same rate — the
+transfer fee is included, so the receiver gets exactly the amount you bought.
+`total_usd` is the full price; `credits` is the exact amount charged.
+
+```go
+// Free: what would 0.05 ETH cost, fee included?
+quote, err := c.Native.Quote(ctx, &cryptochief.NativeQuoteRequest{
+    Network:        cryptochief.ChainEthMainnet,
+    ReceiveAddress: "0xRecipient…", // any address — the platform pays for the transfer
+    Amount:         "0.05",         // human units
+})
+if err != nil {
+    return err
+}
+fmt.Println("coins:", quote.CoinPriceUSD, "+ fee:", quote.TransferFeeUSD,
+    "=", quote.SubtotalUSD, "→ total:", quote.TotalUSD, "→", quote.Credits, "credits")
+
+// Buy at the quoted price (quotes live ~90s and are single-use).
+// Idempotency-Key is REQUIRED — Buy refuses without it locally; the key makes
+// a retry after a timeout return the same order instead of buying twice.
+ctx = cryptochief.WithIdempotencyKey(ctx, "native-2026-09-18-0001")
+order, err := c.Native.Buy(ctx, &cryptochief.NativeBuyRequest{QuoteRef: quote.Ref})
+if err != nil {
+    return err // a real failure — no order exists
+}
+// Buy is synchronous: by now the coins are sent or the refusal is known.
+// A refused/unresolved order comes back as a regular order, not an error:
+switch order.Status {
+case cryptochief.NativeOrderStatusRefused:
+    // 502/402 — nothing was bought or charged; order.Error / order.ErrorCode say why
+case cryptochief.NativeOrderStatusUnresolved:
+    // 409, order.NeedsAttention — may already be delivered; DO NOT retry,
+    // resolve with c.Native.Order(ctx, "native-2026-09-18-0001") or support
+}
+fmt.Println(order.Status, order.TxHash, "for", order.Credits, "credits")
+
+// Later, by the same key:
+order, err = c.Native.Order(ctx, "native-2026-09-18-0001")
+```
+
+Statuses: `delivered` (coins sent, `TxHash` set), `refused` (nothing bought
+or charged — `Credits` / `TotalUSD` / `TxHash` stay empty rather than reading
+as "free", and `Error` / `ErrorCode` say why), `unresolved` (the outcome
+never arrived). A 502 from `Buy` means nothing was charged and is safe to
+retry with the same key — the client's default retry already does; a 402 is
+the same refusal with an empty credits balance (top up first). A 409
+`NEEDS_ATTENTION` must not be retried; a 409 `QUOTE_EXPIRED` /
+`QUOTE_ALREADY_USED` error means re-quote. Refused and unresolved orders
+arrive as a returned order — an `err` from `Buy` means no order exists.
 
 ## Contract calls — the easy way
 

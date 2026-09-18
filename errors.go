@@ -22,6 +22,12 @@ import (
 //
 //	{"data":null,"error":{"status":401,"name":"UnauthorizedError","message":"...","details":{"code":"SIGNATURE_REPLAYED"}}}
 //
+// A fourth shape is an order view answering a non-2xx from Energy.Rent or
+// Native.Buy — the refused/unresolved order itself as the body. There "error"
+// is the human reason and the machine code is "error_code"; those methods
+// return the order instead of an error, so this shape reaches an APIError
+// only through [Client.Request].
+//
 // All resolve onto Code, so Code is the stable string callers should switch
 // on whichever shape the server used. Message keeps the human-readable text,
 // and Raw keeps the whole body.
@@ -113,7 +119,14 @@ const (
 	CodeCallsRequired         = "CALLS_REQUIRED"
 	CodeCallsNotAllowed       = "CALLS_NOT_ALLOWED_FOR_TRANSFER"
 	CodeContractCallsUnsupp   = "CONTRACT_CALLS_UNSUPPORTED_ON_NETWORK"
-	CodeNetworkError          = "NETWORK_ERROR"
+	// CodeContractEstimateUnsupported — Transactions.Estimate with
+	// TxTypeContract: contract calls have no fee-quote mode.
+	CodeContractEstimateUnsupported = "CONTRACT_ESTIMATE_UNSUPPORTED"
+	// CodeIdempotencyKeyRequired — Energy.Rent without an Idempotency-Key on
+	// the context (see WithIdempotencyKey): without the key a retry would buy
+	// the energy a second time (HTTP 400).
+	CodeIdempotencyKeyRequired = "IDEMPOTENCY_KEY_REQUIRED"
+	CodeNetworkError           = "NETWORK_ERROR"
 
 	// CodeNotFound — the object does not exist OR is not this project's; the two
 	// are deliberately indistinguishable.
