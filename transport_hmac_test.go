@@ -98,8 +98,8 @@ func verifyHMACv1(s sentRequest, apiKey, routePath string) error {
 	if err != nil {
 		return err
 	}
-	if s.HMAC != "v1="+want {
-		return fmt.Errorf("X-CC-Signature = %q, want %q", s.HMAC, "v1="+want)
+	if s.HMAC != want {
+		return fmt.Errorf("X-CC-Signature = %q, want %q", s.HMAC, want)
 	}
 	return nil
 }
@@ -193,8 +193,8 @@ func TestTransport_HMACv1IdempotencyKeySigned(t *testing.T) {
 		Body:           body,
 	}
 	want, _ := SignHMACv1(hmacTestAPIKey, in)
-	if got := req.Header.Get(HeaderSignature); got != "v1="+want {
-		t.Fatalf("X-CC-Signature = %q, want %q", got, "v1="+want)
+	if got := req.Header.Get(HeaderSignature); got != want {
+		t.Fatalf("X-CC-Signature = %q, want %q", got, want)
 	}
 	in.IdempotencyKey = ""
 	without, _ := SignHMACv1(hmacTestAPIKey, in)
@@ -582,7 +582,7 @@ func TestTransport_IdempotencyKeyFromContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.HMAC == "v1="+without {
+	if s.HMAC == without {
 		t.Error("Idempotency-Key is not covered by the signature")
 	}
 

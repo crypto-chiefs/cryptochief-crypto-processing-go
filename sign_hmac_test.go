@@ -248,8 +248,10 @@ func TestHMACv1Vectors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if sig != v.Signature {
-				t.Fatalf("signature = %s, want %s", sig, v.Signature)
+			// The vector carries the bare hex; the helper returns the header
+			// value, prefix included.
+			if want := SignatureV1Prefix + v.Signature; sig != want {
+				t.Fatalf("signature = %s, want %s", sig, want)
 			}
 		})
 	}
@@ -289,8 +291,8 @@ func TestSignHMACv1_GETFromRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sig != v.Signature {
-		t.Fatalf("signature = %s, want %s", sig, v.Signature)
+	if want := SignatureV1Prefix + v.Signature; sig != want {
+		t.Fatalf("signature = %s, want %s", sig, want)
 	}
 
 	// The query is signed: drop it and the signature is another one.
@@ -351,8 +353,8 @@ func TestSignHMACv1_EnergyVectors(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s %s: %v", v.method, v.path, err)
 		}
-		if sig != v.want {
-			t.Errorf("%s %s: signature = %s, want %s", v.method, v.path, sig, v.want)
+		if want := SignatureV1Prefix + v.want; sig != want {
+			t.Errorf("%s %s: signature = %s, want %s", v.method, v.path, sig, want)
 		}
 	}
 }
@@ -370,8 +372,8 @@ func TestHMACv1_MethodUpperASCIIOnly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sig != v.Signature {
-			t.Errorf("%q: signature = %s, want %s", method, sig, v.Signature)
+		if want := SignatureV1Prefix + v.Signature; sig != want {
+			t.Errorf("%q: signature = %s, want %s", method, sig, want)
 		}
 	}
 
@@ -518,5 +520,36 @@ func TestHMACv1_LineBreakRejected(t *testing.T) {
 	in.Body = []byte("{\n}\r\n")
 	if _, err := StringToSignHMACv1(in); err != nil {
 		t.Fatalf("body with line breaks: %v", err)
+	}
+}
+
+// TestSignHMACv1_Roundtrip: the value SignHMACv1 returns goes into
+// X-CC-Signature as it is — no prefix to add — and the verifying side accepts
+// the request.
+func TestSignHMACv1_Roundtrip(t *testing.T) {
+	v := loadHMACv1Vectors(t)[0]
+	sig, err := SignHMACv1(v.APIKey, v.input())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(v.Method, "http://gateway.invalid"+v.Path, bytes.NewReader([]byte(v.Body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(headerMerchant, v.Merchant)
+	req.Header.Set(HeaderTimestamp, v.Timestamp)
+	req.Header.Set(headerNonce, v.Nonce)
+	req.Header.Set(HeaderSignature, sig)
+	if v.Body != "" {
+		req.Header.Set("Content-Type", requestVectorContentTypeJSON)
+	}
+
+	g := newMockGatewayHandler(t, map[string]string{v.Merchant: v.APIKey})
+	g.now = fixedClock(v.Now)
+	rec := httptest.NewRecorder()
+	g.ServeHTTP(rec, req)
+	if got := requestOutcome(t, rec); got != requestExpectOK {
+		t.Fatalf("verify = %s, want %s (body %s)", got, requestExpectOK, rec.Body.Bytes())
 	}
 }

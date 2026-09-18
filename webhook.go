@@ -27,9 +27,13 @@ const (
 	HeaderSignature = "X-CC-Signature"
 )
 
+// SignatureV1Prefix starts every X-CC-Signature value — the one a request
+// carries and the one a webhook carries: the scheme version and "=".
+// [SignHMACv1] and [SignWebhookV1] return values that already carry it.
+const SignatureV1Prefix = "v1="
+
 const (
 	webhookV1Scope          = "CC-HMAC-SHA256-WEBHOOK-V1"
-	webhookSignaturePrefix  = "v1="
 	defaultWebhookTolerance = 300 * time.Second
 	webhookDeliveryIDMaxLen = 128
 )
@@ -103,7 +107,7 @@ func SignWebhookV1(apiKey string, timestamp int64, deliveryID string, body []byt
 	if err != nil {
 		return "", err
 	}
-	return webhookSignaturePrefix + hex.EncodeToString(webhookMAC(apiKey, sts)), nil
+	return SignatureV1Prefix + hex.EncodeToString(webhookMAC(apiKey, sts)), nil
 }
 
 // WebhookOption configures [VerifyWebhook] and [WebhookHandler].
@@ -181,10 +185,10 @@ func VerifyWebhook(apiKey string, body []byte, header http.Header, opts ...Webho
 	}
 
 	sigValue, ok := singleWebhookHeader(header, HeaderSignature)
-	if !ok || !strings.HasPrefix(sigValue, webhookSignaturePrefix) {
+	if !ok || !strings.HasPrefix(sigValue, SignatureV1Prefix) {
 		return ErrWebhookHeaders
 	}
-	hexSig := sigValue[len(webhookSignaturePrefix):]
+	hexSig := sigValue[len(SignatureV1Prefix):]
 	if len(hexSig) != 2*sha256.Size {
 		return ErrWebhookHeaders
 	}

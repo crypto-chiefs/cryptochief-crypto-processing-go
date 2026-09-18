@@ -548,7 +548,7 @@ sig, err := cryptochief.SignHMACv1("API_KEY", cryptochief.HMACv1Input{
     Merchant:  "MERCHANT_ID",
     Body:      []byte("{}"),
 })
-// X-CC-Signature: "v1=" + sig
+// X-CC-Signature: sig (the header value, prefix included)
 ```
 
 ## Calling a route the SDK has no method for

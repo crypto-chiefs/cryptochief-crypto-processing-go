@@ -273,7 +273,7 @@ func (c *Client) signHMACv1(req *http.Request, path string, body []byte) error {
 	}
 	req.Header.Set(HeaderTimestamp, ts)
 	req.Header.Set(headerNonce, nonce)
-	req.Header.Set(HeaderSignature, "v1="+sig)
+	req.Header.Set(HeaderSignature, sig)
 	return nil
 }
 

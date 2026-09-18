@@ -105,9 +105,10 @@ func StringToSignHMACv1(in HMACv1Input) (string, error) {
 	return b.String(), nil
 }
 
-// SignHMACv1 returns lowercase hex HMAC-SHA256(key = apiKey, message =
-// [StringToSignHMACv1](in)). The X-CC-Signature header value is "v1=" + the
-// result. The [Client] does this on every request.
+// SignHMACv1 returns the X-CC-Signature header value of a request:
+// [SignatureV1Prefix] and lowercase hex HMAC-SHA256(key = apiKey, message =
+// [StringToSignHMACv1](in)) — the same shape [SignWebhookV1] returns for a
+// webhook. The [Client] does this on every request.
 //
 // Use it to sign a request the SDK does not send itself. To send one through
 // the client instead — signed, retried and with the error envelope parsed —
@@ -124,7 +125,7 @@ func SignHMACv1(apiKey string, in HMACv1Input) (string, error) {
 	}
 	m := hmac.New(sha256.New, []byte(apiKey))
 	m.Write([]byte(sts))
-	return hex.EncodeToString(m.Sum(nil)), nil
+	return SignatureV1Prefix + hex.EncodeToString(m.Sum(nil)), nil
 }
 
 // newHMACv1Nonce returns 32 lowercase hex characters from 16 random bytes.
