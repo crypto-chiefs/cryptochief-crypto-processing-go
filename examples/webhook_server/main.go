@@ -68,7 +68,7 @@ func printBanner(addr string) {
 	fmt.Println(" Routes & lifecycles:")
 	fmt.Println("   /webhook/payout         (terminal-only)  → paid | system_fail")
 	fmt.Println("   /webhook/payin          waiting_asset_select → pending → processing → paid | cancel | expired")
-	fmt.Println("   /webhook/transaction    (terminal-only)  → confirmed | failed | expired")
+	fmt.Println("   /webhook/transaction    (terminal-only)  → confirmed | failed | expired | cancelled")
 	fmt.Println("   /webhook/static-deposit in_mempool → confirm_check → paid | dropped | reorged")
 	fmt.Println("   /webhook/sweep          (confirmed-only) → funds settled on your master wallet")
 	fmt.Println("──────────────────────────────────────────────────────────────")
@@ -152,7 +152,7 @@ func handlePayIn(w http.ResponseWriter, r *http.Request, evt cryptochief.PayInWe
 // ─────────────────────────────────────────────────────────────────────────────
 // Transaction — two-phase sign/execute results
 //
-// Sequence (webhook fires terminal-only):  ... → confirmed | failed | expired
+// Sequence (webhook fires terminal-only):  ... → confirmed | failed | expired | cancelled
 // The intermediate `signed`/`broadcasted` states do NOT trigger webhooks —
 // poll Transactions.Info if you need them. `confirmed` comes at
 // RequiredConfirmations.

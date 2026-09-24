@@ -60,8 +60,8 @@ func WaitForPayout(ctx context.Context, c *Client, uuid string, opts PollOptions
 }
 
 // WaitForTransaction polls /transaction/info until the record reaches a
-// terminal state (confirmed / failed / expired). The last seen state is
-// returned even on timeout.
+// terminal state (confirmed / failed / expired / cancelled). The last seen
+// state is returned even on timeout.
 func WaitForTransaction(ctx context.Context, c *Client, uuid string, opts PollOptions) (*TransactionInfo, error) {
 	return pollUntilTerminal(ctx, opts,
 		func(ctx context.Context) (*TransactionInfo, error) { return c.Transactions.Info(ctx, uuid) },

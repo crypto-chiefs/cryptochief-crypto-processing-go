@@ -119,6 +119,20 @@ const (
 	CodeCallsRequired         = "CALLS_REQUIRED"
 	CodeCallsNotAllowed       = "CALLS_NOT_ALLOWED_FOR_TRANSFER"
 	CodeContractCallsUnsupp   = "CONTRACT_CALLS_UNSUPPORTED_ON_NETWORK"
+	// CodeNonceGap — EVM execute: a lower nonce of the address is held by
+	// another signature that was not executed. Nothing was sent; the
+	// transaction's ErrorReason names that signature when it is known. Execute
+	// it first, then retry the same uuid.
+	CodeNonceGap = "NONCE_GAP"
+	// CodeNonceAlreadyUsed — EVM execute: the chain already used this
+	// transaction's nonce. Nothing was sent by this call.
+	CodeNonceAlreadyUsed = "NONCE_ALREADY_USED"
+	// CodePreviousExecuteUnresolved — EVM sign: an earlier signature from the
+	// same address has an execute whose outcome is not known yet. The code
+	// may carry that signature's uuid
+	// ("PREVIOUS_EXECUTE_UNRESOLVED: uuid=<uuid>"); compare with
+	// strings.HasPrefix. Retry execute of that uuid instead of signing again.
+	CodePreviousExecuteUnresolved = "PREVIOUS_EXECUTE_UNRESOLVED"
 	// CodeContractEstimateUnsupported — Transactions.Estimate with
 	// TxTypeContract: contract calls have no fee-quote mode.
 	CodeContractEstimateUnsupported = "CONTRACT_ESTIMATE_UNSUPPORTED"
@@ -185,6 +199,8 @@ var (
 	ErrSignatureExpired      = &APIError{Code: CodeSignatureExpired}
 	ErrAlreadyExecuted       = &APIError{Code: CodeAlreadyExecuted}
 	ErrPreflightFailed       = &APIError{Code: CodePreflightFailed}
+	ErrNonceGap              = &APIError{Code: CodeNonceGap}
+	ErrNonceAlreadyUsed      = &APIError{Code: CodeNonceAlreadyUsed}
 
 	ErrBadAuthHeaders               = &APIError{Code: CodeBadAuthHeaders}
 	ErrSignatureTimestampOutOfRange = &APIError{Code: CodeSignatureTimestampOutOfRange}

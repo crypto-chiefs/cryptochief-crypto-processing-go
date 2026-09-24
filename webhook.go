@@ -396,7 +396,7 @@ type PayoutWebhookEvent struct {
 
 // TransactionWebhookEvent is the payload on transaction events. Only terminal
 // statuses fire: "transaction.confirmed", "transaction.failed",
-// "transaction.expired".
+// "transaction.expired", "transaction.cancelled".
 type TransactionWebhookEvent struct {
 	Event       string `json:"event"` // "transaction.confirmed" | "transaction.failed" | ...
 	UUID        string `json:"uuid"`
@@ -411,7 +411,7 @@ type TransactionWebhookEvent struct {
 	TxHash      string `json:"tx_hash,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
 	CompletedAt string `json:"completed_at,omitempty"`
-	ErrorReason string `json:"error_reason,omitempty"` // set on transaction.failed
+	ErrorReason string `json:"error_reason,omitempty"` // set on transaction.failed, .expired and .cancelled
 
 	// Confirmations and RequiredConfirmations: see TransactionInfo.
 	Confirmations         int `json:"confirmations"`

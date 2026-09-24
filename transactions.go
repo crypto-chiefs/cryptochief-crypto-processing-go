@@ -28,6 +28,9 @@ const (
 	TxStatusConfirmed    = "confirmed"
 	TxStatusFailed       = "failed"
 	TxStatusExpired      = "expired"
+	// TxStatusCancelled — EVM: replaced by a newer signature from the same
+	// address before it was executed; ErrorReason is SUPERSEDED_BY:<new uuid>.
+	TxStatusCancelled = "cancelled"
 )
 
 // ContractCall is one instruction in a TxTypeContract request.
@@ -131,7 +134,8 @@ type SignTransactionRequest struct {
 	// Contract-mode (TxTypeContract).
 	Calls []ContractCall `json:"calls,omitempty"`
 
-	// URLCallback receives transaction.confirmed / transaction.failed events.
+	// URLCallback receives the transaction.confirmed, transaction.failed,
+	// transaction.expired and transaction.cancelled events.
 	URLCallback string `json:"url_callback,omitempty"`
 }
 
@@ -146,6 +150,10 @@ type SignTransactionResponse struct {
 	ExpiresAt   string `json:"expires_at"`
 	ChainFamily string `json:"chain_family"`
 	Network     Chain  `json:"network,omitempty"`
+	// SupersededUUIDs — EVM: the earlier unexecuted signatures from the same
+	// address that this one replaced; they turn TxStatusCancelled. Empty when
+	// there were none.
+	SupersededUUIDs []string `json:"superseded_uuids,omitempty"`
 }
 
 // ExecuteTransactionRequest is the body of POST /v1/transaction/execute.
@@ -187,7 +195,10 @@ type TransactionInfo struct {
 	// CompletedAt is set on final statuses: for confirmed, the moment
 	// RequiredConfirmations was reached.
 	CompletedAt string `json:"completed_at,omitempty"`
-	// ErrorReason is set on failed and expired.
+	// ErrorReason is set on failed, expired and cancelled (SUPERSEDED_BY:<uuid>),
+	// and on a signed transaction that could not be executed yet
+	// ("NONCE_GAP: missing_nonce=<n> blocking_uuid=<uuid>",
+	// "NONCE_ALREADY_USED: chain_nonce=<n>").
 	ErrorReason string `json:"error_reason,omitempty"`
 
 	// Deprecated: never populated; use CompletedAt.
@@ -205,7 +216,7 @@ type TransactionInfo struct {
 // IsTerminal reports whether the tx reached a final state.
 func (t TransactionInfo) IsTerminal() bool {
 	switch t.Status {
-	case TxStatusConfirmed, TxStatusFailed, TxStatusExpired:
+	case TxStatusConfirmed, TxStatusFailed, TxStatusExpired, TxStatusCancelled:
 		return true
 	}
 	return false
