@@ -198,12 +198,14 @@ func TestWalletLabel_EmptyIsSentNotOmitted(t *testing.T) {
 // The pay-ins of one deposit address are ordinary orders in the ordinary paged
 // envelope: the address must reach the platform, the optional filters must stay
 // off the wire when unset, and the rows must decode as PayIn records rather than
-// into a second, parallel order type.
+// into a second, parallel order type — including the multi-payment progress
+// fields, which stay unset on single-payment rows.
 func TestWalletPayInHistory_WireShapeAndDecode(t *testing.T) {
 	var path, body string
 	srv := captureServer(t, `{"items":[
-		{"uuid":"0a1b2c3d-4e5f-6789-abcd-ef0123456789","order_id":"invoice-1002","status":"paid","amount_crypto":"10.5","payment_coin":"USDT","payment_network":"TRON_MAINNET","to_address":"TQrY8bYc2yQ8sM8nJ1sZ9c2Zx7L2wq7pQb"}
-	],"meta":{"page":1,"page_size":20,"total":1}}`, &path, &body)
+		{"uuid":"0a1b2c3d-4e5f-6789-abcd-ef0123456789","order_id":"invoice-1002","status":"paid","amount_crypto":"10.5","payment_coin":"USDT","payment_network":"TRON_MAINNET","to_address":"TQrY8bYc2yQ8sM8nJ1sZ9c2Zx7L2wq7pQb"},
+		{"uuid":"1b2c3d4e-5f67-489a-bcde-f01234567890","order_id":"invoice-1003","status":"wrong_amount_waiting","amount_crypto":"20","payment_coin":"USDT","payment_network":"TRON_MAINNET","to_address":"TQrY8bYc2yQ8sM8nJ1sZ9c2Zx7L2wq7pQb","is_payment_multiple":true,"received_amount_crypto":"12.5","remaining_amount_crypto":"7.5","payments":[{"txid":"aa11","amount_crypto":"7.5","confirmations":19,"status":"confirmed","seen_at":"2026-09-30T10:00:00Z"},{"txid":"bb22","amount_crypto":"5","confirmations":4,"status":"confirming","seen_at":"2026-09-30T11:00:00Z"}]}
+	],"meta":{"page":1,"page_size":20,"total":2}}`, &path, &body)
 
 	c, _ := New("m", "k", WithBaseURL(srv.URL), WithRetries(0))
 	out, err := c.Wallets.PayInHistory(context.Background(), WalletPayInHistoryQuery{
@@ -224,7 +226,7 @@ func TestWalletPayInHistory_WireShapeAndDecode(t *testing.T) {
 		t.Errorf("body must carry the address alone when nothing else is set, got %v", sent)
 	}
 
-	if len(out.Items) != 1 {
+	if len(out.Items) != 2 {
 		t.Fatalf("items = %d", len(out.Items))
 	}
 	p := out.Items[0]
@@ -234,7 +236,24 @@ func TestWalletPayInHistory_WireShapeAndDecode(t *testing.T) {
 	if p.PaymentNetwork != ChainTronMainnet || p.AmountCrypto != "10.5" {
 		t.Errorf("order = %+v", p)
 	}
-	if out.Meta.Page != 1 || out.Meta.PageSize != 20 || out.Meta.Total != 1 {
+	if p.IsPaymentMultiple || p.ReceivedAmountCrypto != "" || p.RemainingAmountCrypto != "" || p.Payments != nil {
+		t.Errorf("single-payment row gained multi-payment fields: %+v", p)
+	}
+
+	m := out.Items[1]
+	if m.Status != PayInStatusWrongAmountWaiting || m.IsTerminal() {
+		t.Errorf("multi-payment order = %+v, want wrong_amount_waiting, not terminal", m)
+	}
+	if !m.IsPaymentMultiple || m.ReceivedAmountCrypto != "12.5" || m.RemainingAmountCrypto != "7.5" {
+		t.Errorf("multi-payment progress = %+v", m)
+	}
+	if len(m.Payments) != 2 ||
+		m.Payments[1].TxID != "bb22" || m.Payments[1].AmountCrypto != "5" ||
+		m.Payments[1].Confirmations != 4 || m.Payments[1].Status != "confirming" ||
+		m.Payments[1].SeenAt != "2026-09-30T11:00:00Z" {
+		t.Errorf("payments = %+v", m.Payments)
+	}
+	if out.Meta.Page != 1 || out.Meta.PageSize != 20 || out.Meta.Total != 2 {
 		t.Errorf("meta = %+v", out.Meta)
 	}
 

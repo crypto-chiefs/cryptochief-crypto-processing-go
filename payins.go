@@ -22,6 +22,11 @@ const (
 	PayInStatusPending            = "pending"
 	PayInStatusProcessing         = "processing"
 	PayInStatusProcess            = "process"
+	// PayInStatusWrongAmountWaiting: a payment arrived on a multi-payment
+	// order (CreatePayInRequest.IsPaymentMultiple) but the full amount is
+	// not collected yet; the remainder can be topped up until one hour past
+	// ExpiredAt. Not terminal.
+	PayInStatusWrongAmountWaiting = "wrong_amount_waiting"
 	PayInStatusPaid               = "paid"
 	PayInStatusCancel             = "cancel"
 	PayInStatusExpired            = "expired"
@@ -58,12 +63,22 @@ type CreatePayInRequest struct {
 	// a real payment on a test network.
 	Environment string `json:"environment,omitempty"`
 
-	LifetimeSec            int    `json:"lifetime_sec,omitempty"`
-	URLCallback            string `json:"url_callback,omitempty"`
-	URLSuccess             string `json:"url_success,omitempty"`
-	URLError               string `json:"url_error,omitempty"`
-	AdditionalData         string `json:"additional_data,omitempty"`
-	AccuracyPaymentPercent int    `json:"accuracy_payment_percent,omitempty"`
+	LifetimeSec    int    `json:"lifetime_sec,omitempty"`
+	URLCallback    string `json:"url_callback,omitempty"`
+	URLSuccess     string `json:"url_success,omitempty"`
+	URLError       string `json:"url_error,omitempty"`
+	AdditionalData string `json:"additional_data,omitempty"`
+	// AccuracyPaymentPercent is the allowed deviation of the paid amount, in
+	// percent of the order amount: 0 requires an exact payment, up to 15.
+	// The wildcard -1 credits ANY amount - the final status (paid /
+	// paid_less / paid_over) tells which side the payment landed on. Omit
+	// for the platform default of 5.
+	AccuracyPaymentPercent int `json:"accuracy_payment_percent,omitempty"`
+	// IsPaymentMultiple lets the invoice be paid by several transactions: an
+	// underpayment moves the order to wrong_amount_waiting and the remainder
+	// can be topped up until one hour past expired_at. Omit for false, a
+	// single-payment order.
+	IsPaymentMultiple bool `json:"is_payment_multiple,omitempty"`
 
 	// FIAT-mode fields.
 	AmountFiat   string `json:"amount_fiat,omitempty"`
@@ -108,9 +123,18 @@ type PayIn struct {
 	URLError       string       `json:"url_error,omitempty"`
 	AdditionalData string       `json:"additional_data,omitempty"`
 	CanCancel      *bool        `json:"can_cancel,omitempty"`
-	ExpiredAt      string       `json:"expired_at,omitempty"`
-	CreatedAt      string       `json:"created_at,omitempty"`
-	UpdatedAt      string       `json:"updated_at,omitempty"`
+
+	// Multi-payment progress, present only on orders created with
+	// CreatePayInRequest.IsPaymentMultiple; same meaning as in
+	// PayInWebhookEvent.
+	IsPaymentMultiple     bool           `json:"is_payment_multiple,omitempty"`
+	ReceivedAmountCrypto  string         `json:"received_amount_crypto,omitempty"`
+	RemainingAmountCrypto string         `json:"remaining_amount_crypto,omitempty"`
+	Payments              []PayInPayment `json:"payments,omitempty"`
+
+	ExpiredAt string `json:"expired_at,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 // IsTerminal reports whether the order has reached a final state.

@@ -772,6 +772,17 @@ Create a pay-in (invoice) with `c.PayIns.Create(...)`; the customer gets a
 deposit address and you receive a signed webhook when it's paid. See the
 `PayIns` service.
 
+`AccuracyPaymentPercent` sets the tolerated under/overpayment in percent: -1
+accepts any amount (the final `paid` / `paid_less` / `paid_over` status tells
+the direction), 0 requires the exact amount, up to 15; the default is 5. With
+`IsPaymentMultiple` one invoice can be paid in several transactions: an
+underpayment parks the order in `wrong_amount_waiting` (the remainder is
+payable until one hour past `expired_at`), every payment fires
+`invoice.wrong_amount_waiting`, and a payment arriving after the final status
+comes as `invoice.late_payment`. The running progress rides on the webhook's
+`ReceivedAmountCrypto` / `RemainingAmountCrypto` / `Payments` — and on the
+`PayIn` record returned by `Create` / `Info` / `History`.
+
 **How do I send a crypto payout (withdrawal) in Go?**
 `c.Payouts.Execute(...)` with `Coin` / `Network` / `Amount` / `ToAddress`. Pass
 `OrderID` as an idempotency key and use `WaitForPayout` to block until it's

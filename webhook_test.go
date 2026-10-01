@@ -566,6 +566,68 @@ func TestWebhookHandler_PayoutEvent(t *testing.T) {
 	}
 }
 
+// TestWebhookHandler_PayInEvent signs a multi-payment "invoice.
+// wrong_amount_waiting" payload and checks the new fields decode through
+// WebhookHandler; a pre-multi-payment payload decodes with them all unset.
+func TestWebhookHandler_PayInEvent(t *testing.T) {
+	const apiKey = "payin-test-api-key"
+	now := time.Unix(1_800_000_000, 0)
+	body := []byte(`{"event":"invoice.wrong_amount_waiting","uuid":"5b0c7a52-8a1e-4c0e-9d7b-2f3e4a5b6c7d","order_id":"o-9","status":"wrong_amount_waiting","prev_status":"pending","mode":"crypto","amount_crypto":"0.025000","payment_coin":"ETH","payment_network":"ETH_MAINNET","to_address":"0x000000000000000000000000000000000000dEaD","is_payment_multiple":true,"received_amount_crypto":"0.010000","remaining_amount_crypto":"0.015000","payments":[{"txid":"0xaaa","amount_crypto":"0.004000","confirmations":12,"status":"confirmed","seen_at":"2026-10-01T10:00:00Z"},{"txid":"0xbbb","amount_crypto":"0.006000","confirmations":3,"status":"confirming","seen_at":"2026-10-01T10:05:00Z"}]}`)
+
+	var evt PayInWebhookEvent
+	srv := httptest.NewServer(WebhookHandler[PayInWebhookEvent](apiKey, func(w http.ResponseWriter, _ *http.Request, e PayInWebhookEvent) {
+		evt = e
+		w.WriteHeader(http.StatusAccepted)
+	}, WithWebhookClock(func() time.Time { return now })))
+	defer srv.Close()
+
+	sig, err := SignWebhookV1(apiKey, now.Unix(), "deliv-payin-1", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := http.Header{}
+	header.Set(HeaderTimestamp, strconv.FormatInt(now.Unix(), 10))
+	header.Set(HeaderWebhookDelivery, "deliv-payin-1")
+	header.Set(HeaderSignature, sig)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(body))
+	req.Header = header
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status %d, want 202", resp.StatusCode)
+	}
+
+	if evt.Event != "invoice.wrong_amount_waiting" || evt.Status != PayInStatusWrongAmountWaiting {
+		t.Errorf("event/status: %q %q", evt.Event, evt.Status)
+	}
+	if !evt.IsPaymentMultiple {
+		t.Errorf("is_payment_multiple = %v", evt.IsPaymentMultiple)
+	}
+	if evt.ReceivedAmountCrypto != "0.010000" || evt.RemainingAmountCrypto != "0.015000" {
+		t.Errorf("amounts: received=%q remaining=%q", evt.ReceivedAmountCrypto, evt.RemainingAmountCrypto)
+	}
+	if len(evt.Payments) != 2 {
+		t.Fatalf("payments: %d", len(evt.Payments))
+	}
+	p := evt.Payments[1]
+	if p.TxID != "0xbbb" || p.AmountCrypto != "0.006000" || p.Confirmations != 3 || p.Status != "confirming" || p.SeenAt != "2026-10-01T10:05:00Z" {
+		t.Errorf("payments[1]: %+v", p)
+	}
+
+	var legacy PayInWebhookEvent
+	if err := json.Unmarshal([]byte(`{"event":"invoice.paid","uuid":"u","order_id":"o","status":"paid"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.IsPaymentMultiple || legacy.ReceivedAmountCrypto != "" || legacy.RemainingAmountCrypto != "" || legacy.Payments != nil {
+		t.Errorf("legacy payload gained fields: %+v", legacy)
+	}
+}
+
 func TestWebhookHandler_Responses(t *testing.T) {
 	const apiKey = "test_api_key_123"
 	body := []byte(`{"event":"payout.paid","uuid":"abc","order_id":"o1","status":"paid"}`)

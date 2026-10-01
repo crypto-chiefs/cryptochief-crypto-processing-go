@@ -178,6 +178,17 @@ func TestRequestBodies_V090(t *testing.T) {
 			},
 		},
 		{
+			"PayIns.Create/accuracy wildcard and multi-payment", "/v1/payments/order/create",
+			`{"accuracy_payment_percent":-1,"amount_crypto":"0.5","asset":{"coin":"ETH","network":"ETH_MAINNET"},"is_payment_multiple":true,"mode":"crypto","order_id":"o-5","user_id":"u-5"}`,
+			func() error {
+				return discard(c.PayIns.Create(ctx, &CreatePayInRequest{
+					OrderID: "o-5", UserID: "u-5", Mode: PayInModeCrypto, AmountCrypto: "0.5",
+					Asset:                  &Asset{Network: ChainEthMainnet, Coin: "ETH"},
+					AccuracyPaymentPercent: -1, IsPaymentMultiple: true,
+				}))
+			},
+		},
+		{
 			"PayIns.SelectAsset/required", "/v1/payments/asset/select",
 			`{"coin":"USDT","network":"TRON_MAINNET","uuid":"0b7c7f2e-7a51-4d3b-9d7e-0d5c6f1a2b3c"}`,
 			func() error {

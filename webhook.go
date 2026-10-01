@@ -421,7 +421,11 @@ type TransactionWebhookEvent struct {
 // PayInWebhookEvent is the payload on pay-in events. The event names carry
 // the "invoice." prefix server-side: "invoice.paid", "invoice.paid_over",
 // "invoice.paid_less", "invoice.canceled", "invoice.expired",
-// "invoice.confirming", "invoice.system_fail".
+// "invoice.confirming", "invoice.system_fail",
+// "invoice.wrong_amount_waiting" (a payment arrived but the amount is not
+// collected yet; fires on EVERY incoming payment of a multi-payment order)
+// and "invoice.late_payment" (a payment arrived after the final status,
+// inside the observation window).
 type PayInWebhookEvent struct {
 	Event            string    `json:"event"`
 	UUID             string    `json:"uuid"`
@@ -439,6 +443,26 @@ type PayInWebhookEvent struct {
 	PaymentNetwork   Chain     `json:"payment_network,omitempty"`
 	ToAddress        string    `json:"to_address,omitempty"`
 	TxID             string    `json:"txid,omitempty"`
+
+	// Multi-payment progress, present only on orders created with
+	// CreatePayInRequest.IsPaymentMultiple: IsPaymentMultiple echoes the
+	// flag, ReceivedAmountCrypto is the sum received so far,
+	// RemainingAmountCrypto what is left to collect, and Payments lists each
+	// transaction counted toward the order.
+	IsPaymentMultiple     bool           `json:"is_payment_multiple,omitempty"`
+	ReceivedAmountCrypto  string         `json:"received_amount_crypto,omitempty"`
+	RemainingAmountCrypto string         `json:"remaining_amount_crypto,omitempty"`
+	Payments              []PayInPayment `json:"payments,omitempty"`
+}
+
+// PayInPayment is one transaction counted toward a multi-payment PayIn
+// order, as reported in PayInWebhookEvent.Payments.
+type PayInPayment struct {
+	TxID          string `json:"txid"`
+	AmountCrypto  string `json:"amount_crypto"`
+	Confirmations int    `json:"confirmations"`
+	Status        string `json:"status"`
+	SeenAt        string `json:"seen_at,omitempty"`
 }
 
 // StaticDepositWebhookEvent is the payload on static-deposit events. The

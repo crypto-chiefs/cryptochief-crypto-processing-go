@@ -118,6 +118,9 @@ func handlePayout(w http.ResponseWriter, r *http.Request, evt cryptochief.Payout
 //
 // Sequence:  waiting_asset_select → pending → processing → paid | cancel | expired
 // Fulfil orders ONLY on `paid`.
+// Multi-payment orders (created with IsPaymentMultiple) also park in
+// wrong_amount_waiting while the amount is collected — evt.Payments lists what
+// arrived; a payment after the final status arrives as invoice.late_payment.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handlePayIn(w http.ResponseWriter, r *http.Request, evt cryptochief.PayInWebhookEvent) {
@@ -134,6 +137,10 @@ func handlePayIn(w http.ResponseWriter, r *http.Request, evt cryptochief.PayInWe
 
 	case cryptochief.PayInStatusProcessing, cryptochief.PayInStatusProcess:
 		log.Printf("  → ACTION (optional): show 'payment received, waiting for confirmations' UI")
+
+	case cryptochief.PayInStatusWrongAmountWaiting:
+		log.Printf("  → ACTION: multi-payment order %q partially paid: received=%s remaining=%s (%d payments); the remainder is payable until expired_at+1h",
+			evt.OrderID, evt.ReceivedAmountCrypto, evt.RemainingAmountCrypto, len(evt.Payments))
 
 	case cryptochief.PayInStatusPaid:
 		log.Printf("  → ACTION: FULFIL order %q; credit user account; send receipt", evt.OrderID)
