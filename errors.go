@@ -1,8 +1,11 @@
 package cryptochief
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 )
 
 // APIError is the typed form of a Crypto Chief error response.
@@ -208,19 +211,39 @@ var (
 	ErrPayloadTooLarge              = &APIError{Code: CodePayloadTooLarge}
 )
 
-// IsRetryable reports whether an error is plausibly transient and worth
-// retrying. The transport uses it internally; callers can use it too if they
-// retry at a higher level.
+// IsRetryable reports whether the client retries err automatically: a network
+// error (no response, or a response body that could not be read) or HTTP 502,
+// 503 or 504. Every other status is not retryable. An error that is not an
+// [*APIError] is retryable when it is a [net.Error], the kind [http.Client]
+// returns for a failed request. Callers that retry at a higher level can use
+// it to apply the same rule.
 func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		// Server gave us a structured response — only 5xx are retryable.
-		// Don't retry validation/billing errors.
-		return apiErr.HTTPStatus >= 500 || apiErr.Code == CodeNetworkError
+		// The client's own NETWORK_ERROR carries no body; a server response
+		// is judged by its status whatever its code.
+		if apiErr.Code == CodeNetworkError && len(apiErr.Raw) == 0 {
+			return true
+		}
+		return retryableStatus(apiErr.HTTPStatus)
 	}
-	// Bare network/transport errors — retryable.
-	return true
+	// The caller's own deadline or cancellation is not a failure to retry.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+// retryableStatus reports whether the client retries a response with this
+// HTTP status: 502, 503 and 504.
+func retryableStatus(status int) bool {
+	switch status {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }

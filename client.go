@@ -109,9 +109,10 @@ func WithLogger(l Logger) Option {
 	return func(c *Client) { c.logger = l }
 }
 
-// WithRetries configures automatic retry for transport-level failures and
-// 5xx responses. max=0 disables retry; the default is 3 attempts with
-// exponential backoff (200ms → 400ms → 800ms, jittered, capped at 5s).
+// WithRetries sets how many times a request is retried after a network error
+// or HTTP 502, 503 or 504; any other status is returned without a retry.
+// max=0 disables retry; the default is 3 retries with exponential backoff
+// (200ms → 400ms → 800ms, jittered, capped at 5s).
 //
 // Idempotent requests are safe to retry. Crypto Chief's payout/execute and
 // batch/execute use the merchant-supplied order_id for idempotency — a

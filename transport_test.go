@@ -240,7 +240,7 @@ func TestTransport_SentinelMatchesGatewayCode(t *testing.T) {
 	}
 }
 
-func TestTransport_RetriesOn5xx(t *testing.T) {
+func TestTransport_RetriesOn502(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&hits, 1)

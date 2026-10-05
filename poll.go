@@ -93,9 +93,8 @@ func pollUntilTerminal[T any](
 	for {
 		obj, err := fetch(ctx)
 		if err != nil {
-			// Soft-tolerate transient errors and try again next tick — the
-			// transport already retried 5xx; if we're here on a 4xx (e.g.
-			// uuid not yet visible) the next poll might succeed.
+			// Keep polling after a network error or HTTP 502, 503, 504
+			// ([IsRetryable]); any other error ends the wait.
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return last, err
 			}

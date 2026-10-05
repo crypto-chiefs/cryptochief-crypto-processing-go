@@ -110,9 +110,10 @@ func (c *Client) Request(ctx context.Context, method, path string, in, out any) 
 }
 
 // send is the single transport entry point. It encodes in with encoding/json
-// (nil gives an empty body), signs each attempt, sends the request, retries on
-// transient failures, parses the response envelope, and unmarshals success
-// into out (which may be nil for endpoints that return only a status field).
+// (nil gives an empty body), signs each attempt, sends the request, retries
+// network errors and HTTP 502, 503 and 504, parses the response envelope, and
+// unmarshals success into out (which may be nil for endpoints that return
+// only a status field).
 //
 // method is used as given; path must start with "/" — e.g. "/v1/payout/estimate".
 func (c *Client) send(ctx context.Context, method, path string, in, out any) error {
@@ -236,8 +237,8 @@ func (c *Client) send(ctx context.Context, method, path string, in, out any) err
 				continue
 			}
 		}
-		// 5xx are retryable; 4xx are not (validation/billing — caller fault).
-		if resp.StatusCode >= 500 {
+		// Only 502, 503 and 504 are retried; every other status is returned.
+		if IsRetryable(apiErr) {
 			lastErr = apiErr
 			continue
 		}

@@ -139,6 +139,9 @@
 // API errors arrive as [*APIError] with a stable Code field. Compare
 // with the Code* constants or [errors.Is] against the Err* sentinels.
 //
+// The client retries network errors and HTTP 502, 503 and 504 (see
+// [WithRetries]); [IsRetryable] applies the same rule.
+//
 // # Amounts
 //
 // All on-chain amounts are passed as decimal strings (e.g. "0.0001") or,
@@ -148,4 +151,4 @@
 package cryptochief
 
 // Version is the library version reported in the User-Agent header.
-const Version = "0.13.0"
+const Version = "0.15.0"

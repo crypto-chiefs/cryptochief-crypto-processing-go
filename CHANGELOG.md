@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.15.0] — 2026-10-05
+
+- Automatic retries: 502, 503, 504 and network errors only; 500 is no longer retried. `IsRetryable` follows the same rule.
+
 ## [0.14.0] — 2026-10-01
 
 - Multi-payment PayIn (`is_payment_multiple`): an invoice can be paid in several transfers; underpaid orders sit in `wrong_amount_waiting`, top-ups are accepted until `expired_at` + 1 hour, a partial timeout finalizes as `paid_less`; new webhook events `invoice.wrong_amount_waiting` (on every receipt) and `invoice.late_payment`; webhook payloads and `PayIn` models carry `is_payment_multiple`, `received_amount_crypto`, `remaining_amount_crypto` and `payments[]`
@@ -60,8 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transfer to an address the chain has not seen yet). `TxTypeContract` is
   refused with `CodeContractEstimateUnsupported` — contract calls have no
   fee-quote mode. An infrastructure failure of the estimate itself answers
-  502 `ESTIMATE_UNAVAILABLE`, which the client's default retry treats as
-  transient, like any 5xx.
+  502 `ESTIMATE_UNAVAILABLE`, which the client retries automatically.
 - `Client.Energy` — TRON energy rental, charged to the same credits balance
   as every other paid call. `Quote` (free of charge) prices a rental and holds
   the price until it expires, publishing what burning TRX directly would cost

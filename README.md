@@ -23,8 +23,8 @@ error codes.
 - **Contract calls without hand-encoded calldata** — Solidity ABI for EVM
   and TRON, Anchor + Borsh for Solana, Jetton / NFT / comment helpers for TON.
 - **Local RSA decryption** of generated wallet private keys (opt-in).
-- Stable error codes, `errors.Is`-friendly sentinels, automatic retry on
-  transient failures.
+- Stable error codes, `errors.Is`-friendly sentinels, automatic retry of
+  502, 503, 504 and network errors.
 - Arbitrary-precision amounts via `math/big` — no `float64`, ever.
 - Webhook verification + generic typed `http.Handler` middleware.
 - Polling helpers that block until a payout / transaction / pay-in is terminal.
@@ -675,6 +675,10 @@ if errors.As(err, &apiErr) {
 `errors.Is(err, cryptochief.ErrInsufficientFunds)` works too — the package
 exposes sentinel `*APIError` values for the same codes.
 
+The client retries network errors and HTTP 502, 503 and 504 (`WithRetries`);
+any other status is returned without a retry. `cryptochief.IsRetryable(err)`
+applies the same rule.
+
 `Code` is read from either error format:
 
 | Server | Body | Code |
@@ -709,7 +713,7 @@ nanoTON decimal string `AttachedTON` and friends expect.
 c, err := cryptochief.New("MERCHANT_ID", "API_KEY",
     cryptochief.WithBaseURL("https://api-processing.crypto-chief.com"), // default
     cryptochief.WithHTTPClient(&http.Client{Timeout: 60 * time.Second}),
-    cryptochief.WithRetries(3),                          // 5xx + transport
+    cryptochief.WithRetries(3),                          // 502, 503, 504 + network errors
     cryptochief.WithRetryBackoff(200*time.Millisecond, 5*time.Second),
     cryptochief.WithUserAgent("my-service/1.0"),
     cryptochief.WithLogger(slog.Default()),
@@ -724,8 +728,8 @@ base URL — point a test-mode project's credentials at the same client.
 
 `Payouts.Execute` and `Payouts.BatchExecute` are idempotent on `OrderID`:
 re-submitting the same `order_id` returns the same `uuid` rather than
-creating a second payout. The library's automatic retry on 5xx relies on
-this — your callers don't need any extra ceremony.
+creating a second payout. The library's automatic retry relies on this —
+your callers don't need any extra ceremony.
 
 `WithIdempotencyKey` puts an `Idempotency-Key` header on every call made with
 the returned context:
