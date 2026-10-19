@@ -104,10 +104,24 @@ const (
 	// CodeLabelTooLong — a wallet label over 255 characters. Decided by the
 	// gateway, which sends the code in "error" and the sentence in "msg";
 	// like every gateway code it reaches the caller as Code.
-	CodeLabelTooLong          = "LABEL_TOO_LONG"
-	CodeServiceError          = "SERVICE_ERROR"
-	CodeUnauthorized          = "UNAUTHORIZED"
-	CodeURLCallbackRequired   = "URL_CALLBACK_REQUIRED"
+	CodeLabelTooLong        = "LABEL_TOO_LONG"
+	CodeServiceError        = "SERVICE_ERROR"
+	CodeUnauthorized        = "UNAUTHORIZED"
+	CodeURLCallbackRequired = "URL_CALLBACK_REQUIRED"
+	// url_callback refusals (PayIns.Create, Payouts.Execute, each item of
+	// Payouts.BatchExecute, Transactions.Sign, HTTP 400):
+	//
+	//   - CodeURLCallbackHostNotAllowed — the host is a non-public IP address,
+	//     a single-label or local name, or resolves to a non-public address.
+	//   - CodeURLCallbackSchemeInvalid — the scheme is not https or http.
+	//   - CodeURLCallbackInvalid — not an absolute URL.
+	CodeURLCallbackHostNotAllowed = "url_callback_HOST_NOT_ALLOWED"
+	CodeURLCallbackSchemeInvalid  = "url_callback_SCHEME_INVALID"
+	CodeURLCallbackInvalid        = "url_callback_INVALID"
+	// CodeCallbackURLInvalid — the callback_url of a static wallet
+	// (Wallets.Generate, Wallets.SetCallbackURL) breaks the same rule; the
+	// reason is in Message (HTTP 400).
+	CodeCallbackURLInvalid    = "CALLBACK_URL_INVALID"
 	CodeBatchEmpty            = "BATCH_EMPTY"
 	CodeBatchTooLarge         = "BATCH_TOO_LARGE"
 	CodeBatchDuplicateOrderID = "BATCH_DUPLICATE_ORDER_ID"
@@ -139,6 +153,15 @@ const (
 	// CodeContractEstimateUnsupported — Transactions.Estimate with
 	// TxTypeContract: contract calls have no fee-quote mode.
 	CodeContractEstimateUnsupported = "CONTRACT_ESTIMATE_UNSUPPORTED"
+	// CodeInsufficientBalance — Transactions.Estimate or Transactions.Sign of a
+	// token transfer: from_address holds less of the token than Value (HTTP
+	// 400). Transactions.Execute reports it as
+	// "PREFLIGHT_FAILED: insufficient_balance".
+	CodeInsufficientBalance = "INSUFFICIENT_BALANCE"
+	// CodeSimulationReverted — EVM Transactions.Sign: the transaction reverted
+	// in simulation (HTTP 400). The contract's reason may follow
+	// ("SIMULATION_REVERTED: <reason>"); compare with strings.HasPrefix.
+	CodeSimulationReverted = "SIMULATION_REVERTED"
 	// CodeIdempotencyKeyRequired — Energy.Rent without an Idempotency-Key on
 	// the context (see WithIdempotencyKey): without the key a retry would buy
 	// the energy a second time (HTTP 400).
@@ -204,6 +227,7 @@ var (
 	ErrPreflightFailed       = &APIError{Code: CodePreflightFailed}
 	ErrNonceGap              = &APIError{Code: CodeNonceGap}
 	ErrNonceAlreadyUsed      = &APIError{Code: CodeNonceAlreadyUsed}
+	ErrInsufficientBalance   = &APIError{Code: CodeInsufficientBalance}
 
 	ErrBadAuthHeaders               = &APIError{Code: CodeBadAuthHeaders}
 	ErrSignatureTimestampOutOfRange = &APIError{Code: CodeSignatureTimestampOutOfRange}
