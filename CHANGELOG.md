@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Error codes `CodeInsufficientBalance` (sentinel `ErrInsufficientBalance`), `CodeSimulationReverted` (match by prefix), `CodeURLCallbackHostNotAllowed`, `CodeURLCallbackSchemeInvalid`, `CodeURLCallbackInvalid`, `CodeCallbackURLInvalid`.
+
 ## [0.15.0] — 2026-10-05
 
 - Automatic retries: 502, 503, 504 and network errors only; 500 is no longer retried. `IsRetryable` follows the same rule.
