@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.15.1] — 2026-10-19
 
 - Error codes `CodeInsufficientBalance` (sentinel `ErrInsufficientBalance`), `CodeSimulationReverted` (match by prefix), `CodeURLCallbackHostNotAllowed`, `CodeURLCallbackSchemeInvalid`, `CodeURLCallbackInvalid`, `CodeCallbackURLInvalid`.
 
