@@ -248,7 +248,7 @@ func (s *TransactionsService) Estimate(ctx context.Context, in *EstimateTransact
 
 // Sign builds and signs a transaction WITHOUT broadcasting. Returns the uuid
 // to reference in Execute, plus the signed hex bytes for inspection. The
-// signature has a per-family TTL (EVM 10m, UTXO 15m, TRON 45s, Solana 60s,
+// signature has a per-family TTL (EVM 10m, UTXO 15m, TRON 45s, Solana 25s,
 // XRP 90s, TON 300s) — call Execute before it elapses.
 func (s *TransactionsService) Sign(ctx context.Context, in *SignTransactionRequest) (*SignTransactionResponse, error) {
 	var out SignTransactionResponse

@@ -132,7 +132,7 @@ if final.Succeeded() {
 
 `Transactions.Sign` builds and cryptographically signs a transaction
 **without broadcasting**. The TTL of the signed reservation varies by
-chain (EVM 10m, UTXO 15m, TRON 45s, Solana 60s, XRP 90s, TON 300s) — call
+chain (EVM 10m, UTXO 15m, TRON 45s, Solana 25s, XRP 90s, TON 300s) — call
 `Execute` before it expires.
 
 ```go
