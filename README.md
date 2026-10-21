@@ -796,6 +796,10 @@ confirmed. Works for native coins and ERC-20 / TRC-20 stablecoins (USDT, USDC).
 `c.Payouts.BatchExecute(...)` — up to 50 recipients in one signed request,
 processed sequentially so the double-spend invariant holds.
 
+Both `BatchEstimate` and `BatchExecute` return `BatchItemResult` items with
+an optional `HTTPStatus` (`*int`, nil when omitted). `item.IsRetryable()` is
+true only for `HTTPStatus=502`; retry execute items with the same `OrderID`.
+
 **How do I call a smart contract (ERC-20, Uniswap) without encoding calldata?**
 `c.Transactions.SignEVMCall(...)`, or `ERC20Transfer` for a token-transfer
 one-liner. Give it a Solidity signature plus args and the SDK ABI-encodes the

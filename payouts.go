@@ -1,6 +1,9 @@
 package cryptochief
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // PayoutsService groups payout-related endpoints. Access via Client.Payouts.
 type PayoutsService struct{ c *Client }
@@ -246,6 +249,16 @@ type BatchItemResult struct {
 	Status  string `json:"status"`
 	UUID    string `json:"uuid,omitempty"`
 	Error   string `json:"error,omitempty"`
+
+	// HTTPStatus is the HTTP status the item would return as a single payout
+	// request. Present only for errors; nil when omitted.
+	HTTPStatus *int `json:"http_status,omitempty"`
+}
+
+// IsRetryable reports whether the item's HTTPStatus is 502 (temporary failure).
+// Retry BatchExecute items with the same OrderID.
+func (r BatchItemResult) IsRetryable() bool {
+	return r.HTTPStatus != nil && *r.HTTPStatus == http.StatusBadGateway
 }
 
 // BatchExecuteResponse is the response of /payout/batch/{estimate,execute}.

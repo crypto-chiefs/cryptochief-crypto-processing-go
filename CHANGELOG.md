@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.16.0] — 2026-10-21
+
+- Optional `http_status` on batch payout estimate and execute items (`BatchItemResult.HTTPStatus`).
+- `BatchItemResult.IsRetryable` reports whether an item can be retried: only `http_status=502`.
+
 ## [0.15.1] — 2026-10-19
 
 - Error codes `CodeInsufficientBalance` (sentinel `ErrInsufficientBalance`), `CodeSimulationReverted` (match by prefix), `CodeURLCallbackHostNotAllowed`, `CodeURLCallbackSchemeInvalid`, `CodeURLCallbackInvalid`, `CodeCallbackURLInvalid`.
