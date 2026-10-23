@@ -190,6 +190,7 @@ func handleTransaction(w http.ResponseWriter, r *http.Request, evt cryptochief.T
 // Sequence:  in_mempool → confirm_check → paid | dropped | reorged
 // Only `paid` is final. `dropped`/`reorged` retract a deposit that briefly
 // appeared in `in_mempool`/`confirm_check` — roll back any optimistic credit.
+// A `reorged` deposit can come back with the same UUID and reach `paid`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func handleStaticDeposit(w http.ResponseWriter, r *http.Request, evt cryptochief.StaticDepositWebhookEvent) {
