@@ -151,4 +151,4 @@
 package cryptochief
 
 // Version is the library version reported in the User-Agent header.
-const Version = "0.16.0"
+const Version = "0.16.1"
