@@ -1,6 +1,9 @@
 package cryptochief
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // TransactionsService groups the two-phase signature/execute endpoints —
 // merchants can sign and broadcast arbitrary transactions from any of their
@@ -52,9 +55,21 @@ type ContractCall struct {
 
 // SolanaAccount mirrors Solana's AccountMeta.
 type SolanaAccount struct {
-	Pubkey     string `json:"pubkey"`
+	Address    string `json:"address"` // base58
 	IsSigner   bool   `json:"is_signer"`
 	IsWritable bool   `json:"is_writable"`
+
+	// Deprecated: use Address. Sent as address when Address is empty.
+	Pubkey string `json:"-"`
+}
+
+// MarshalJSON sends the account as {address, is_signer, is_writable}.
+func (a SolanaAccount) MarshalJSON() ([]byte, error) {
+	if a.Address == "" {
+		a.Address = a.Pubkey
+	}
+	type wire SolanaAccount
+	return json.Marshal(wire(a))
 }
 
 // EstimateTransactionRequest is the body of POST /v1/transaction/estimate —

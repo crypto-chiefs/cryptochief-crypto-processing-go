@@ -125,8 +125,8 @@ func (s *TransactionsService) ERC20Transfer(ctx context.Context, in *ERC20Transf
 //	        cryptochief.BorshPubkey("Recipient…"),
 //	    },
 //	    Accounts: []cryptochief.SolanaAccount{
-//	        {Pubkey: "Acc1…", IsSigner: true,  IsWritable: true},
-//	        {Pubkey: "Acc2…", IsSigner: false, IsWritable: true},
+//	        {Address: "Acc1…", IsSigner: true,  IsWritable: true},
+//	        {Address: "Acc2…", IsSigner: false, IsWritable: true},
 //	    },
 //	    URLCallback: "https://your.app/webhooks/transaction",
 //	})

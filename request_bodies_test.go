@@ -291,10 +291,10 @@ func TestRequestBodies_V090(t *testing.T) {
 		},
 		{
 			"Transactions.Sign/calls", "/v1/transaction/signature",
-			`{"calls":[{"accounts":[{"is_signer":true,"is_writable":false,"pubkey":"11111111111111111111111111111111"},{"is_signer":false,"is_writable":false,"pubkey":"11111111111111111111111111111111"}],"data":"AQID","to":"11111111111111111111111111111111"},{"bounce":false,"data":"","to":"EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs","value":"0"},{"bounce":true,"data":"x","to":"EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs","value":"1"}],"from_address":"11111111111111111111111111111111","network":"SOLANA_DEVNET","type":"contract"}`,
+			`{"calls":[{"accounts":[{"address":"11111111111111111111111111111111","is_signer":true,"is_writable":false},{"address":"11111111111111111111111111111111","is_signer":false,"is_writable":false}],"data":"AQID","to":"11111111111111111111111111111111"},{"bounce":false,"data":"","to":"EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs","value":"0"},{"bounce":true,"data":"x","to":"EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs","value":"1"}],"from_address":"11111111111111111111111111111111","network":"SOLANA_DEVNET","type":"contract"}`,
 			func() error {
 				return discard(c.Transactions.Sign(ctx, &SignTransactionRequest{Network: ChainSolanaDevnet, FromAddress: sol, Type: TxTypeContract, Calls: []ContractCall{
-					{To: sol, Data: "AQID", Accounts: []SolanaAccount{{Pubkey: sol, IsSigner: true}, {Pubkey: sol}}},
+					{To: sol, Data: "AQID", Accounts: []SolanaAccount{{Address: sol, IsSigner: true}, {Pubkey: sol}}},
 					{To: ton, Value: "0", Bounce: &no},
 					{To: ton, Value: "1", Data: "x", Bounce: &yes, Accounts: []SolanaAccount{}},
 				}}))

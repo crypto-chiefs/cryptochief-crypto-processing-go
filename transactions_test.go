@@ -2,6 +2,7 @@ package cryptochief
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -237,5 +238,27 @@ func TestTransactions_EstimateContractUnsupported(t *testing.T) {
 	}
 	if apiErr.HTTPStatus != http.StatusBadRequest {
 		t.Errorf("HTTPStatus = %d, want 400", apiErr.HTTPStatus)
+	}
+}
+
+// TestSolanaAccount_WireAddress: an account meta goes out as address; the
+// deprecated Pubkey is sent as address when Address is empty.
+func TestSolanaAccount_WireAddress(t *testing.T) {
+	cases := []struct {
+		in   SolanaAccount
+		want string
+	}{
+		{SolanaAccount{Address: "A", IsSigner: true, IsWritable: true}, `{"address":"A","is_signer":true,"is_writable":true}`},
+		{SolanaAccount{Pubkey: "P", IsWritable: true}, `{"address":"P","is_signer":false,"is_writable":true}`},
+		{SolanaAccount{Address: "A", Pubkey: "P"}, `{"address":"A","is_signer":false,"is_writable":false}`},
+	}
+	for _, tc := range cases {
+		got, err := json.Marshal(tc.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.want {
+			t.Errorf("Marshal(%+v) = %s, want %s", tc.in, got, tc.want)
+		}
 	}
 }

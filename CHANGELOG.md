@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Solana account metas in contract calls are sent as `address`, the field the API reads. New field `SolanaAccount.Address`; `Pubkey` is deprecated and sent as `address`.
+
 ## [0.16.0] — 2026-10-21
 
 - Optional `http_status` on batch payout estimate and execute items (`BatchItemResult.HTTPStatus`).

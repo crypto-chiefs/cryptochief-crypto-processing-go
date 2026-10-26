@@ -43,8 +43,8 @@ func main() {
 		// Solana has no on-chain ABI — you MUST supply the accounts in the
 		// order the program expects (refer to your program's IDL/source).
 		Accounts: []cryptochief.SolanaAccount{
-			{Pubkey: mustEnv("FROM_ADDRESS"), IsSigner: true, IsWritable: true},
-			{Pubkey: "11111111111111111111111111111111", IsSigner: false, IsWritable: false}, // System program
+			{Address: mustEnv("FROM_ADDRESS"), IsSigner: true, IsWritable: true},
+			{Address: "11111111111111111111111111111111", IsSigner: false, IsWritable: false}, // System program
 		},
 		URLCallback: "https://example.com/webhooks/transaction",
 	})

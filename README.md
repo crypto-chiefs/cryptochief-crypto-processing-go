@@ -382,9 +382,9 @@ signed, _ := c.Transactions.SignAnchorCall(ctx, &cryptochief.AnchorCallRequest{
         cryptochief.BorshPubkey("Recipient…"),
     },
     Accounts: []cryptochief.SolanaAccount{
-        {Pubkey: "YourWallet…", IsSigner: true,  IsWritable: true},
-        {Pubkey: "DataAcct…",   IsSigner: false, IsWritable: true},
-        {Pubkey: "11111111111111111111111111111111", IsSigner: false, IsWritable: false},
+        {Address: "YourWallet…", IsSigner: true,  IsWritable: true},
+        {Address: "DataAcct…",   IsSigner: false, IsWritable: true},
+        {Address: "11111111111111111111111111111111", IsSigner: false, IsWritable: false},
     },
 })
 ```
